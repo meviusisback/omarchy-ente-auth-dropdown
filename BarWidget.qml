@@ -27,11 +27,15 @@ Panel {
 
   function scriptPath() {
     // ente-auth-dropdown ships next to this file inside the plugin folder.
+    // plugin dir comes from `omarchy plugin add` (fixed path, no spaces), so
+    // plain file:// stripping is enough; no percent-decoding layer.
     return Qt.resolvedUrl("ente-auth-dropdown").toString().replace(/^file:\/\//, "")
   }
 
   // Every automatic process starts with a CLEARED environment plus an explicit
-  // allowlist: hyprctl needs the compositor address, nothing else.
+  // allowlist: hyprctl needs the compositor address, nothing else. Residual:
+  // allowlisted values are visible in /proc cmdline to local users; the socket
+  // dir itself (0700) remains the real boundary, and no secrets pass here.
   readonly property var cliEnvPassthrough: [
     "XDG_RUNTIME_DIR", "HYPRLAND_INSTANCE_SIGNATURE", "WAYLAND_DISPLAY", "DBUS_SESSION_BUS_ADDRESS"
   ]
@@ -72,6 +76,10 @@ Panel {
         root.authedVisible = (line === "VISIBLE=1")
       }
     }
+    stderr: StdioCollector {
+    }
+    // Recovery if the poll itself fails to spawn or exit: never wedge the icon.
+    onExited: root.authedVisible = false
   }
 
   Process {
@@ -83,6 +91,31 @@ Panel {
         pollTimer.running = true
         root.refresh()
       }
+    }
+    stderr: StdioCollector {
+    }
+    // stdout always closes at process end, but a failed spawn might not: the
+    // exit signal is the authoritative busy-clear.
+    onExited: {
+      root.busy = false
+      pollTimer.running = true
+      root.refresh()
+    }
+  }
+
+  // Watchdog: a toggle normally finishes in well under 20s (15s launch wait +
+  // retries). Past that the action is stuck: terminate it and recover instead
+  // of leaving the button disabled with polling suspended forever.
+  Timer {
+    id: toggleWatchdog
+    interval: 20000
+    repeat: false
+    running: root.busy
+    onTriggered: {
+      actionProc.running = false
+      root.busy = false
+      pollTimer.running = true
+      root.refresh()
     }
   }
 

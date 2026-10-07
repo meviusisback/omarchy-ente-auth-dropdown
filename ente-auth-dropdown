@@ -34,20 +34,44 @@ fi
 
 die() { printf 'Error: %s\n' "$*" >&2; exit 1; }
 
-HYPRCTL="$(command -v hyprctl)" || die "hyprctl not found"
-SLEEP="$(command -v sleep)" || die "sleep not found"
-PYTHON3="$(command -v python3)" || die "python3 not found"
+# Fixed absolute binaries on EVERY path: the widget spawns this script under
+# env -i, so no PATH lookup may happen here (bash would fall back to a compiled
+# default PATH, but an explicit path leaves no room for hijack).
+for _t in /usr/bin/hyprctl /usr/bin/sleep /usr/bin/python3 /usr/bin/timeout /usr/bin/head; do
+  [ -x "$_t" ] || die "missing trusted tool: $_t"
+done
+HYPRCTL=/usr/bin/hyprctl
+SLEEP=/usr/bin/sleep
+PYTHON3=/usr/bin/python3
+TIMEOUT_BIN=/usr/bin/timeout
+
+# Bounded compositor read shared by the toggle path (same discipline as the
+# status verb): 2s deadline, 64KB cap, failures degrade to empty.
+hypr_cap() {
+  "$TIMEOUT_BIN" 2 "$HYPRCTL" "$@" 2>/dev/null | /usr/bin/head -c 65536
+}
 
 # Prints: VISIBLE=<0|1> PRESENT=<0|1> where VISIBLE = special:WS shown somewhere.
+# Literals mirror the WS/APP_CLASS constants; matching is glob on capped
+# output, never eval.
 snapshot() {
-  "$HYPRCTL" monitors -j 2>/dev/null | grep -q "\"name\": *\"special:$WS\"" && VISIBLE=1 || VISIBLE=0
-  "$HYPRCTL" clients -j 2>/dev/null | grep -q "\"class\": *\"$APP_CLASS\"" && PRESENT=1 || PRESENT=0
+  local mon cli
+  mon="$(hypr_cap monitors -j)"
+  cli="$(hypr_cap clients -j)"
+  case "$mon" in
+    *'"name":'*'"special:ente-auth"'*) VISIBLE=1 ;;
+    *) VISIBLE=0 ;;
+  esac
+  case "$cli" in
+    *'"class":'*'"io.ente.auth"'*) PRESENT=1 ;;
+    *) PRESENT=0 ;;
+  esac
   printf 'VISIBLE=%s PRESENT=%s\n' "$VISIBLE" "$PRESENT"
 }
 
 # Workspace name of the running Ente window ("none" if absent/unreadable).
 window_ws() {
-  APP="$APP_CLASS" "$HYPRCTL" clients -j 2>/dev/null | "$PYTHON3" -c 'import json,os,sys
+  APP="$APP_CLASS" hypr_cap clients -j | "$PYTHON3" -c 'import json,os,sys
 want = os.environ.get("APP", "")
 try:
   data = json.load(sys.stdin)

@@ -24,6 +24,10 @@ BIND_END="-- END $MARKER"
 _ESCAPED_BIN="${BIN_DST//\\/\\\\}"
 _ESCAPED_BIN="${_ESCAPED_BIN//\"/\\\"}"
 BIND_LINE="o.bind(\"SUPER + E\", \"Toggle Ente Auth\", \"${_ESCAPED_BIN} toggle\")"
+# A newline in $HOME would break out of the generated Lua line: refuse it.
+case "$BIN_DST" in
+  *$'\n'*|*$'\r'*) die "HOME contains a newline: refusing to write the keybind" ;;
+esac
 HOOK_LINE="-- Added by the $MARKER script: installs the Ente Auth dropdown window rules."
 HOOK_DO="do local path = (os.getenv(\"XDG_CONFIG_HOME\") or os.getenv(\"HOME\") .. \"/.config\") .. \"/hypr/ente-auth.lua\"; local file = io.open(path, \"r\"); if file then file:close(); dofile(path) end end"
 
@@ -43,6 +47,38 @@ refuse_link() {
   [ ! -L "$d" ] || die "refusing to write into $d: it is a symlink"
 }
 
+# One-time migration from the pre-plugin era: strip legacy id=='ente-auth'
+# command-module entries from shell.json (tolerant: a missing or unreadable
+# file is not an error). Only touches type==command entries, never the plugin
+# widget (different id anyway).
+migrate_legacy_bar_module() {
+  "$PYTHON3" - "$HOME_DIR/.config/omarchy/shell.json" <<'EOF'
+import json, os, sys
+p = sys.argv[1]
+try:
+    d = json.loads(open(p).read())
+except (OSError, ValueError):
+    print("legacy migration skipped: shell.json unreadable")
+    raise SystemExit(0)
+lay = d.get("bar", {}).get("layout", {})
+removed = False
+for s in lay.values():
+    if not isinstance(s, list):
+        continue
+    keep = [m for m in s if not (isinstance(m, dict) and m.get("id") == "ente-auth" and m.get("type") == "command")]
+    if len(keep) != len(s):
+        s[:] = keep
+        removed = True
+if removed:
+    tmp = p + ".tmp"
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o644)
+    with os.fdopen(fd, "w") as h:
+        json.dump(d, h, indent=2)
+    os.replace(tmp, p)
+print("legacy bar module removed:", removed)
+EOF
+}
+
 do_install() {
   bash -n "$REPO_DIR/ente-auth-dropdown" || die "toggle script has syntax errors"
   # Pre-check everything first: a missing config must abort BEFORE partial writes.
@@ -57,6 +93,9 @@ do_install() {
   cmp -s "$REPO_DIR/ente-auth-dropdown" "$BIN_DST" || die "copy to $BIN_DST failed to verify"
   install -m644 "$REPO_DIR/hypr/ente-auth.lua" "$RULES_DST"
   cmp -s "$REPO_DIR/hypr/ente-auth.lua" "$RULES_DST" || die "copy to $RULES_DST failed to verify"
+  # Backups before the first append (only if no .bak exists yet).
+  [ -e "$HYPR_LUA.bak" ] || cp -p "$HYPR_LUA" "$HYPR_LUA.bak"
+  [ -e "$BIND_LUA.bak" ] || cp -p "$BIND_LUA" "$BIND_LUA.bak"
   if ! grep -qF -- "$HOOK_LINE" "$HYPR_LUA"; then
     printf '%s\n%s\n' "$HOOK_LINE" "$HOOK_DO" >> "$HYPR_LUA"
     msg "hook added to hyprland.lua"
@@ -70,7 +109,8 @@ do_install() {
     msg "keybind already present"
   fi
   # Bar icon comes from the plugin widget (manifest bar-widget), never from a
-  # shell.json command module. Nothing to install here.
+  # shell.json command module. Strip any legacy entry left by older installs.
+  migrate_legacy_bar_module
   "$HYPRCTL" reload
   "$SLEEP" 1
   errs="$("$HYPRCTL" configerrors 2>&1)" || true
@@ -87,7 +127,11 @@ do_install() {
 }
 
 do_uninstall() {
+  for f in "$BIN_DST" "$RULES_DST" "$BAR_SCRIPT_DST"; do
+    refuse_link "$f"
+  done
   rm -f "$BIN_DST" "$RULES_DST" "$BAR_SCRIPT_DST"
+  migrate_legacy_bar_module
   # Exact-line removal only (no sed regex ranges): drop exactly the lines we
   # added, via temp file + rename so a planted symlink is replaced, not followed.
   "$PYTHON3" - "$BIND_LUA" "$HYPR_LUA" <<'EOF'
@@ -103,7 +147,8 @@ def rewrite(path, keep):
     if len(kept) == len(lines):
         return False
     tmp = path + ".tmp"
-    with open(tmp, "w") as h:
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o644)
+    with os.fdopen(fd, "w") as h:
         h.writelines(kept)
     os.replace(tmp, path)
     return True
@@ -131,7 +176,8 @@ def drop_block(path):
     if not changed:
         return False
     tmp = path + ".tmp"
-    with open(tmp, "w") as h:
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o644)
+    with os.fdopen(fd, "w") as h:
         h.writelines(out)
     os.replace(tmp, path)
     return True
