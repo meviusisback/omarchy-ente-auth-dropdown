@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+# ente-auth-dropdown — toggle the real Ente Auth desktop app as a dropdown overlay.
+#
+# No secrets, no network, no parsing of untrusted data: this script only asks the
+# compositor whether a window with our fixed class exists and shows/hides the
+# special workspace. The Ente app itself owns the login, the E2EE sync and the codes.
+#
+# argv-only exec; single fixed class/workspace constants below, never external input.
+set -euo pipefail
+
+APP_CLASS="io.ente.auth"      # Ente Auth desktop (verified via host `hyprctl clients`)
+WS="ente-auth"                # special workspace name (no spaces, fixed)
+LAUNCH="/usr/bin/enteauth"   # AUR ente-auth; absolute path, no PATH lookup
+
+die() { printf 'Error: %s\n' "$*" >&2; exit 1; }
+
+HYPRCTL="$(command -v hyprctl)" || die "hyprctl not found"
+SLEEP="$(command -v sleep)" || die "sleep not found"
+
+# Prints: VISIBLE=<0|1> PRESENT=<0|1> where VISIBLE = special:WS shown somewhere.
+snapshot() {
+  "$HYPRCTL" monitors -j 2>/dev/null | grep -q "\"name\": *\"special:$WS\"" && VISIBLE=1 || VISIBLE=0
+  "$HYPRCTL" clients -j 2>/dev/null | grep -q "\"class\": *\"$APP_CLASS\"" && PRESENT=1 || PRESENT=0
+  printf 'VISIBLE=%s PRESENT=%s\n' "$VISIBLE" "$PRESENT"
+}
+
+# NOTE: dispatcher form for Hyprland 0.56 Lua engine (legacy
+# `togglespecialworkspace <ws>` fails silently on this build).
+# Return code is checked: a rejected dispatch must never read as success.
+toggle_ws() {
+  local out
+  out="$("$HYPRCTL" dispatch "hl.dsp.workspace.toggle_special(\"$WS\")" 2>&1)" || die "toggle dispatch failed: $out"
+}
+
+eval "$(snapshot)"
+
+if [ "$PRESENT" = "1" ] && [ "$VISIBLE" = "0" ]; then
+  toggle_ws          # running but hidden -> show
+elif [ "$VISIBLE" = "0" ]; then
+  # shellcheck disable=SC2086
+  $LAUNCH >/dev/null 2>&1 &   # not running -> launch (rule puts it on special:WS)
+  disown || true
+  for _ in 1 2 3 4 5 6 7 8 9 10; do
+    "$SLEEP" 0.3
+    eval "$(snapshot)"
+    [ "$PRESENT" = "1" ] && break
+  done
+  eval "$(snapshot)"
+  [ "$VISIBLE" = "0" ] && [ "$PRESENT" = "1" ] && toggle_ws
+else
+  toggle_ws          # visible -> hide
+fi
