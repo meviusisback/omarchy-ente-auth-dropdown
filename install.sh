@@ -26,13 +26,13 @@ do_install() {
   cmp -s "$REPO_DIR/ente-auth-dropdown" "$BIN_DST" || die "copy to $BIN_DST failed to verify"
   install -m644 "$REPO_DIR/hypr/ente-auth.lua" "$RULES_DST"
   cmp -s "$REPO_DIR/hypr/ente-auth.lua" "$RULES_DST" || die "copy to $RULES_DST failed to verify"
-  if ! grep -qF "$HOOK_LINE" "$HYPR_LUA"; then
+  if ! grep -qF -- "$HOOK_LINE" "$HYPR_LUA"; then
     printf '%s\n%s\n' "$HOOK_LINE" "$HOOK_DO" >> "$HYPR_LUA"
     msg "hook added to hyprland.lua"
   else
     msg "hook already present"
   fi
-  if ! grep -qF "$BIND_BEGIN" "$BIND_LUA"; then
+  if ! grep -qF -- "$BIND_BEGIN" "$BIND_LUA"; then
     printf '%s\n%s\n%s\n' "$BIND_BEGIN" "$BIND_LINE" "$BIND_END" >> "$BIND_LUA"
     msg "keybind added to bindings.lua"
   else
