@@ -14,10 +14,10 @@ BIN_DST="$HOME_DIR/.local/bin/ente-auth-dropdown"
 RULES_DST="$HOME_DIR/.config/hypr/ente-auth.lua"
 HYPR_LUA="$HOME_DIR/.config/hypr/hyprland.lua"
 BIND_LUA="$HOME_DIR/.config/hypr/bindings.lua"
-EXEC_ABS="$HOME_DIR/.config/omarchy/bar/scripts/ente-auth-status"
-BAR_SCRIPT_SRC="$REPO_DIR/bar/ente-auth-status"
-BAR_SCRIPT_DST="$EXEC_ABS"
-SHELL_JSON="$HOME_DIR/.config/omarchy/shell.json"
+# Legacy command-module script path: removed from the repo, deleted from disk
+# by uninstall if a previous install left it behind. Never installed anymore
+# (the bar icon is the plugin widget now).
+BAR_SCRIPT_DST="$HOME_DIR/.config/omarchy/bar/scripts/ente-auth-status"
 BIND_BEGIN="-- BEGIN $MARKER"
 BIND_END="-- END $MARKER"
 # Lua-escape the bind path: a quote/backslash in $HOME must not break the string.
@@ -45,15 +45,14 @@ refuse_link() {
 
 do_install() {
   bash -n "$REPO_DIR/ente-auth-dropdown" || die "toggle script has syntax errors"
-  bash -n "$BAR_SCRIPT_SRC" || die "bar status script has syntax errors"
   # Pre-check everything first: a missing config must abort BEFORE partial writes.
-  for f in "$HYPR_LUA" "$BIND_LUA" "$SHELL_JSON"; do
+  for f in "$HYPR_LUA" "$BIND_LUA"; do
     [ -f "$f" ] || die "missing config (nothing written): $f"
   done
-  for f in "$BIN_DST" "$RULES_DST" "$HYPR_LUA" "$BIND_LUA" "$BAR_SCRIPT_DST" "$SHELL_JSON"; do
+  for f in "$BIN_DST" "$RULES_DST" "$HYPR_LUA" "$BIND_LUA"; do
     refuse_link "$f"
   done
-  mkdir -p "$HOME_DIR/.local/bin" "$HOME_DIR/.config/hypr" "$HOME_DIR/.config/omarchy/bar/scripts"
+  mkdir -p "$HOME_DIR/.local/bin" "$HOME_DIR/.config/hypr"
   install -m755 "$REPO_DIR/ente-auth-dropdown" "$BIN_DST"
   cmp -s "$REPO_DIR/ente-auth-dropdown" "$BIN_DST" || die "copy to $BIN_DST failed to verify"
   install -m644 "$REPO_DIR/hypr/ente-auth.lua" "$RULES_DST"
@@ -70,36 +69,8 @@ do_install() {
   else
     msg "keybind already present"
   fi
-  install -m755 "$BAR_SCRIPT_SRC" "$BAR_SCRIPT_DST"
-  cmp -s "$BAR_SCRIPT_SRC" "$BAR_SCRIPT_DST" || die "copy to $BAR_SCRIPT_DST failed to verify"
-  # Bar module: validate, backup, atomic write; upsert exec/onClick every run so
-  # older installs converge to absolute paths instead of carrying stale values.
-  "$PYTHON3" - "$SHELL_JSON" "$BIN_DST" "$EXEC_ABS" <<'EOF'
-import json, os, sys
-p, cli, exe = sys.argv[1], sys.argv[2], sys.argv[3]
-d = json.loads(open(p).read())
-lay = d.get("bar", {}).get("layout", {})
-right = lay.get("right")
-if not isinstance(right, list):
-    raise SystemExit("shell.json has no bar.layout.right list; refusing to edit")
-entry = {"id": "ente-auth", "type": "command", "exec": exe,
-         "interval": 2, "tooltip": "Ente Auth", "onClick": cli + " toggle"}
-for i, m in enumerate(right):
-    if isinstance(m, dict) and m.get("id") == "ente-auth":
-        right[i] = entry
-        break
-else:
-    right.append(entry)
-bak = p + ".bak"
-if not os.path.exists(bak):
-    with open(bak, "w") as h:
-        h.write(json.dumps(json.loads(open(p).read()), indent=2))
-tmp = p + ".tmp"
-with open(tmp, "w") as h:
-    json.dump(d, h, indent=2)
-os.replace(tmp, p)
-print("bar module installed in shell.json (backup: shell.json.bak)")
-EOF
+  # Bar icon comes from the plugin widget (manifest bar-widget), never from a
+  # shell.json command module. Nothing to install here.
   "$HYPRCTL" reload
   "$SLEEP" 1
   errs="$("$HYPRCTL" configerrors 2>&1)" || true
@@ -170,27 +141,6 @@ hook_exact = {
 }
 print("keybind block removed:", drop_block(bind_path))
 print("hook lines removed:", rewrite(hook_path, lambda ln: ln.rstrip("\n") not in hook_exact))
-EOF
-  "$PYTHON3" - "$SHELL_JSON" <<'EOF'
-import json, os, sys
-p = sys.argv[1]
-try:
-    d = json.loads(open(p).read())
-except (OSError, ValueError) as exc:
-    print(f"shell.json unreadable, skipping: {exc}")
-    raise SystemExit
-lay = d.get("bar", {}).get("layout", {})
-changed = False
-for s in lay.values():
-    before = len(s)
-    s[:] = [m for m in s if not (isinstance(m, dict) and m.get("id") == "ente-auth")]
-    changed = changed or len(s) != before
-if changed:
-    tmp = p + ".tmp"
-    with open(tmp, "w") as h:
-        json.dump(d, h, indent=2)
-    os.replace(tmp, p)
-print("bar module removed:", changed)
 EOF
   "$HYPRCTL" reload
   msg "Uninstalled."
