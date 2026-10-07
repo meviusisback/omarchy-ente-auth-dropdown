@@ -17,7 +17,7 @@ sulla barra non serve — `SUPER + E` la mostra/nasconde ovunque tu sia.
 Nessun segreto toccato: login, sync E2EE e codici restano nell'app di Ente.
 Lo script chiede solo al compositor se la finestra esiste.
 
-Chiusura: premi di nuovo `SUPER + E`. Se hai `special_fallthrough` attivo
+Chiusura: premi di nuovo `SUPER + E` (oppure `Esc` a lista visibile: chiude il pannello). Se hai `special_fallthrough` attivo
 (lo imposta già il plugin dropdown-terminal), basta anche cliccare fuori.
 
 ## Installazione
