@@ -6,7 +6,8 @@ sulla barra non serve — `SUPER + E` la mostra/nasconde ovunque tu sia.
 ## Come funziona
 
 - `hypr/ente-auth.lua` — regola finestra: la classe `io.ente.auth` va su
-  `special:ente-auth`, flottante, centrata sotto la barra (520px x 85% monitor).
+  `special:ente-auth`, flottante, centrata sotto la barra (70% larghezza
+  x 95% altezza del monitor).
 - `ente-auth-dropdown` — script di toggle: se l'app gira nascosta la mostra,
   se visibile la nasconde, se non gira la lancia (`/usr/bin/enteauth`, AUR).
   Usa la sintassi dispatcher Lua di Hyprland 0.56
@@ -17,8 +18,10 @@ sulla barra non serve — `SUPER + E` la mostra/nasconde ovunque tu sia.
 Nessun segreto toccato: login, sync E2EE e codici restano nell'app di Ente.
 Lo script chiede solo al compositor se la finestra esiste.
 
-Chiusura: premi di nuovo `SUPER + E` (oppure `Esc` a lista visibile: chiude il pannello). Se hai `special_fallthrough` attivo
-(lo imposta già il plugin dropdown-terminal), basta anche cliccare fuori.
+Chiusura: premi di nuovo `SUPER + E` (oppure `Esc` a lista visibile: è l'app
+stessa a chiudere il pannello). Se hai `special_fallthrough` attivo
+(lo imposta già il plugin dropdown-terminal, non questo script), basta anche
+cliccare fuori.
 
 ## Icona nella top bar
 

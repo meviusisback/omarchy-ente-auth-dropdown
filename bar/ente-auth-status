@@ -5,11 +5,22 @@
 set -euo pipefail
 
 HYPRCTL="${HYPRCTL:-$(command -v hyprctl 2>/dev/null || echo /usr/bin/hyprctl)}"
+TIMEOUT="$(command -v timeout 2>/dev/null || true)"
 ICON=$'\uf023'  # fa-lock (Nerd Fonts); literal glyphs get mangled by file tools, escape is exact
+
+# Bounded compositor read: a stalled socket must degrade to inactive, never
+# stack blocked 2s pollers.
+hypr_json() {
+  if [ -n "$TIMEOUT" ]; then
+    "$TIMEOUT" 2 "$HYPRCTL" "$@" 2>/dev/null
+  else
+    "$HYPRCTL" "$@" 2>/dev/null
+  fi
+}
 
 visible=0
 if [ -x "$HYPRCTL" ]; then
-  if "$HYPRCTL" monitors -j 2>/dev/null | grep -q '"name": *"special:ente-auth"'; then
+  if hypr_json monitors -j | grep -q '"name": *"special:ente-auth"'; then
     visible=1
   fi
 fi
