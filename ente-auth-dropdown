@@ -103,7 +103,9 @@ if [ "$PRESENT" = "0" ]; then
   done
   eval "$(snapshot)"
   [ "$PRESENT" = "0" ] && die "launch produced no $APP_CLASS window"
-  show_ws
+  # Show only if still hidden: a fast window may arrive already visible, and an
+  # unconditional show would hide-then-reshow it (flicker).
+  [ "$VISIBLE" = "0" ] && show_ws
 else
   ws="$(window_ws)"
   if [ "$ws" != "none" ] && [ "$ws" != "special:$WS" ]; then

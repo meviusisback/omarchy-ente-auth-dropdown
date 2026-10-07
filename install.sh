@@ -105,11 +105,13 @@ EOF
   errs="$("$HYPRCTL" configerrors 2>&1)" || true
   [ -z "$errs" ] || msg "warning: hyprctl configerrors reports: $errs"
   # Harmless dispatcher probe: wrong form must error NOW (exit code checked),
-  # right form is a no-op toggled straight back.
+  # right form is a no-op toggled straight back. Warning only: on hosts without
+  # a live Hyprland (SSH, TTY) the probe cannot run, and that must not abort an
+  # otherwise good install.
   "$HYPRCTL" dispatch 'hl.dsp.workspace.toggle_special("zzz-no-such")' >/dev/null \
-    || die "dispatcher probe failed: Lua dispatcher form rejected"
+    || msg "warning: dispatcher probe failed (Hyprland unreachable or non-Lua build?)"
   "$HYPRCTL" dispatch 'hl.dsp.workspace.toggle_special("zzz-no-such")' >/dev/null \
-    || die "dispatcher probe failed on toggle-back"
+    || msg "warning: dispatcher probe failed on toggle-back"
   msg "Installed. Press SUPER + E for Ente Auth."
 }
 
