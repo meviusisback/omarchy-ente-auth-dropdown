@@ -24,6 +24,28 @@ snapshot() {
   printf 'VISIBLE=%s PRESENT=%s\n' "$VISIBLE" "$PRESENT"
 }
 
+# Workspace name of the running Ente window ("none" if absent/unreadable).
+window_ws() {
+  "$HYPRCTL" clients -j 2>/dev/null | python3 -c 'import json,sys
+try:
+  data = json.load(sys.stdin)
+except Exception:
+  print("none"); raise SystemExit
+for c in data:
+  if isinstance(c, dict) and c.get("class") == "io.ente.auth":
+    print((c.get("workspace") or {}).get("name", ""))
+    break
+else:
+  print("none")' 2>/dev/null || echo none
+}
+
+# Pull a stray Ente window (running outside our special workspace) into it.
+# Best-effort: float/size come from the window rule at first map, so a window
+# that was already open keeps its tiling until the app is relaunched.
+pull_into_special() {
+  "$HYPRCTL" eval 'local t; for _, w in ipairs(hl.get_windows()) do if w.class == "io.ente.auth" then t = w; break end end; if t then hl.dispatch(hl.dsp.window.move({ window = t, workspace = "special:ente-auth" })) end' >/dev/null 2>&1 || true
+}
+
 # NOTE: dispatcher form for Hyprland 0.56 Lua engine (legacy
 # `togglespecialworkspace <ws>` fails silently on this build).
 # Return code is checked: a rejected dispatch must never read as success.
@@ -33,6 +55,15 @@ toggle_ws() {
 }
 
 eval "$(snapshot)"
+
+if [ "$PRESENT" = "1" ]; then
+  ws="$(window_ws)"
+  if [ "$ws" != "none" ] && [ "$ws" != "special:$WS" ]; then
+    pull_into_special
+    "$SLEEP" 0.3
+    eval "$(snapshot)"
+  fi
+fi
 
 if [ "$PRESENT" = "1" ] && [ "$VISIBLE" = "0" ]; then
   toggle_ws          # running but hidden -> show
