@@ -1,0 +1,121 @@
+#!/usr/bin/env bash
+# ente-auth-dropdown — toggle the real Ente Auth desktop app as a dropdown overlay.
+#
+# No secrets, no network, no parsing of untrusted data: this script only asks the
+# compositor whether a window with our fixed class exists and shows/hides the
+# special workspace. The Ente app itself owns the login, the E2EE sync and the codes.
+#
+# argv-only exec; single fixed class/workspace constants below, never external input.
+set -euo pipefail
+
+APP_CLASS="io.ente.auth"      # Ente Auth desktop (verified via host `hyprctl clients`)
+WS="ente-auth"                # special workspace name (no spaces, fixed)
+LAUNCH="/usr/bin/enteauth"   # AUR ente-auth; absolute path, no PATH lookup
+
+die() { printf 'Error: %s\n' "$*" >&2; exit 1; }
+
+HYPRCTL="$(command -v hyprctl)" || die "hyprctl not found"
+SLEEP="$(command -v sleep)" || die "sleep not found"
+PYTHON3="$(command -v python3)" || die "python3 not found"
+
+# Prints: VISIBLE=<0|1> PRESENT=<0|1> where VISIBLE = special:WS shown somewhere.
+snapshot() {
+  "$HYPRCTL" monitors -j 2>/dev/null | grep -q "\"name\": *\"special:$WS\"" && VISIBLE=1 || VISIBLE=0
+  "$HYPRCTL" clients -j 2>/dev/null | grep -q "\"class\": *\"$APP_CLASS\"" && PRESENT=1 || PRESENT=0
+  printf 'VISIBLE=%s PRESENT=%s\n' "$VISIBLE" "$PRESENT"
+}
+
+# Workspace name of the running Ente window ("none" if absent/unreadable).
+window_ws() {
+  APP="$APP_CLASS" "$HYPRCTL" clients -j 2>/dev/null | "$PYTHON3" -c 'import json,os,sys
+want = os.environ.get("APP", "")
+try:
+  data = json.load(sys.stdin)
+except Exception:
+  print("none"); raise SystemExit
+for c in data:
+  if isinstance(c, dict) and c.get("class") == want:
+    print((c.get("workspace") or {}).get("name", "") or "none")
+    break
+else:
+  print("none")' 2>/dev/null || echo none
+}
+
+# Pull a stray Ente window (running outside our special workspace) into it.
+# Best-effort: float/size come from the window rule at first map, so a window
+# that was already open keeps its tiling until the app is relaunched.
+pull_into_special() {
+  "$HYPRCTL" eval 'local t; for _, w in ipairs(hl.get_windows()) do if w.class == "io.ente.auth" then t = w; break end end; if t then hl.dispatch(hl.dsp.window.move({ window = t, workspace = "special:ente-auth" })) end' >/dev/null 2>&1 || true
+}
+
+# NOTE: dispatcher form for Hyprland 0.56 Lua engine (legacy
+# `togglespecialworkspace <ws>` fails silently on this build).
+# Return code is checked: a rejected dispatch must never read as success.
+toggle_ws() {
+  local out
+  out="$("$HYPRCTL" dispatch "hl.dsp.workspace.toggle_special(\"$WS\")" 2>&1)" || die "toggle dispatch failed: $out"
+}
+
+# Show with verification: a stale monitors read must never flip into a hide.
+show_ws() {
+  local i
+  for i in 1 2 3; do
+    toggle_ws
+    "$SLEEP" 0.4
+    eval "$(snapshot)"
+    [ "$VISIBLE" = "1" ] && return 0
+  done
+  die "could not show the dropdown (still hidden after 3 tries)"
+}
+
+# Hide with verification: retry while a fresh read still says visible.
+hide_ws() {
+  local i
+  for i in 1 2 3; do
+    toggle_ws
+    "$SLEEP" 0.4
+    eval "$(snapshot)"
+    [ "$VISIBLE" = "0" ] && return 0
+  done
+  die "could not hide the dropdown (still visible after 3 tries)"
+}
+
+case "${1:-toggle}" in
+  toggle) ;;
+  *) die "unknown command: $1 (only 'toggle' is supported)" ;;
+esac
+
+eval "$(snapshot)"
+
+if [ "$PRESENT" = "0" ]; then
+  # Not running: hide a stale empty workspace, then launch fresh (rule places it).
+  if [ "$VISIBLE" = "1" ]; then
+    toggle_ws
+    "$SLEEP" 0.3
+  fi
+  [ -x "$LAUNCH" ] || die "cannot launch: $LAUNCH is missing or not executable"
+  "$LAUNCH" >/dev/null 2>&1 &
+  disown || true
+  for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20 21 22 23 24 25 26 27 28 29 30; do
+    "$SLEEP" 0.5
+    eval "$(snapshot)"
+    [ "$PRESENT" = "1" ] && break
+  done
+  eval "$(snapshot)"
+  [ "$PRESENT" = "0" ] && die "launch produced no $APP_CLASS window"
+  # Show only if still hidden: a fast window may arrive already visible, and an
+  # unconditional show would hide-then-reshow it (flicker).
+  [ "$VISIBLE" = "0" ] && show_ws
+else
+  ws="$(window_ws)"
+  if [ "$ws" != "none" ] && [ "$ws" != "special:$WS" ]; then
+    pull_into_special
+    "$SLEEP" 0.3
+    eval "$(snapshot)"
+  fi
+  if [ "$VISIBLE" = "0" ]; then
+    show_ws              # running but hidden -> show
+  else
+    hide_ws              # visible -> hide (verified, bounded retries)
+  fi
+fi
