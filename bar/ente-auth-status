@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# ente-auth-status — bar module output for the Ente Auth dropdown icon.
+# Prints one Waybar-style JSON line: a lock glyph, tooltip, and active class
+# while special:ente-auth is visible. No secrets, no input, bounded output.
+set -euo pipefail
+
+HYPRCTL="${HYPRCTL:-$(command -v hyprctl 2>/dev/null || echo /usr/bin/hyprctl)}"
+ICON=""
+
+visible=0
+if [ -x "$HYPRCTL" ]; then
+  if "$HYPRCTL" monitors -j 2>/dev/null | grep -q '"name": *"special:ente-auth"'; then
+    visible=1
+  fi
+fi
+
+if [ "$visible" = "1" ]; then
+  printf '{"text":"%s","tooltip":"Ente Auth (visible — SUPER+E to hide)","class":"active"}\n' "$ICON"
+else
+  printf '{"text":"%s","tooltip":"Ente Auth (SUPER+E)","class":"inactive"}\n' "$ICON"
+fi
