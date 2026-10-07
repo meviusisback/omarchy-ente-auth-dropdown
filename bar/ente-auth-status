@@ -5,7 +5,7 @@
 set -euo pipefail
 
 HYPRCTL="${HYPRCTL:-$(command -v hyprctl 2>/dev/null || echo /usr/bin/hyprctl)}"
-ICON=""
+ICON=$'\uf023'  # fa-lock (Nerd Fonts); literal glyphs get mangled by file tools, escape is exact
 
 visible=0
 if [ -x "$HYPRCTL" ]; then
