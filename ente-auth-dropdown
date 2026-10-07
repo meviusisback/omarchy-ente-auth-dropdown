@@ -54,6 +54,30 @@ toggle_ws() {
   out="$("$HYPRCTL" dispatch "hl.dsp.workspace.toggle_special(\"$WS\")" 2>&1)" || die "toggle dispatch failed: $out"
 }
 
+# Show with verification: a stale monitors read must never flip into a hide.
+show_ws() {
+  local i
+  for i in 1 2 3; do
+    toggle_ws
+    "$SLEEP" 0.4
+    eval "$(snapshot)"
+    [ "$VISIBLE" = "1" ] && return 0
+  done
+  die "could not show the dropdown (still hidden after 3 tries)"
+}
+
+# Hide with verification: retry while a fresh read still says visible.
+hide_ws() {
+  local i
+  for i in 1 2 3; do
+    toggle_ws
+    "$SLEEP" 0.4
+    eval "$(snapshot)"
+    [ "$VISIBLE" = "0" ] && return 0
+  done
+  die "could not hide the dropdown (still visible after 3 tries)"
+}
+
 eval "$(snapshot)"
 
 if [ "$PRESENT" = "1" ]; then
@@ -66,7 +90,7 @@ if [ "$PRESENT" = "1" ]; then
 fi
 
 if [ "$PRESENT" = "1" ] && [ "$VISIBLE" = "0" ]; then
-  toggle_ws          # running but hidden -> show
+  show_ws              # running but hidden -> show
 elif [ "$VISIBLE" = "0" ]; then
   # shellcheck disable=SC2086
   $LAUNCH >/dev/null 2>&1 &   # not running -> launch (rule puts it on special:WS)
@@ -77,7 +101,7 @@ elif [ "$VISIBLE" = "0" ]; then
     [ "$PRESENT" = "1" ] && break
   done
   eval "$(snapshot)"
-  [ "$VISIBLE" = "0" ] && [ "$PRESENT" = "1" ] && toggle_ws
+  [ "$VISIBLE" = "0" ] && [ "$PRESENT" = "1" ] && show_ws
 else
-  toggle_ws          # visible -> hide
+  hide_ws              # visible -> hide (verified, bounded retries)
 fi
