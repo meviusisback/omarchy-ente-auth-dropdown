@@ -5,7 +5,7 @@
 o.window("io.ente.auth", {
   workspace = "special:ente-auth",
   float = true,
-  size = { 520, "(monitor_h*85/100)" },
+  size = { 640, "(monitor_h*95/100)" },
   move = { "center", "36" },
   animation = "slide top",
   border_size = 3,
