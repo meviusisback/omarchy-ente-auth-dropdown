@@ -15,6 +15,9 @@ BIND_END="-- END $MARKER"
 BIND_LINE="o.bind(\"SUPER + E\", \"Toggle Ente Auth\", \"$BIN_DST toggle\")"
 HOOK_LINE="-- Added by the $MARKER script: installs the Ente Auth dropdown window rules."
 HOOK_DO="do local path = (os.getenv(\"XDG_CONFIG_HOME\") or os.getenv(\"HOME\") .. \"/.config\") .. \"/hypr/ente-auth.lua\"; local file = io.open(path, \"r\"); if file then file:close(); dofile(path) end end"
+BAR_SCRIPT_SRC="$REPO_DIR/bar/ente-auth-status"
+BAR_SCRIPT_DST="$HOME_DIR/.config/omarchy/bar/scripts/ente-auth-status"
+SHELL_JSON="$HOME_DIR/.config/omarchy/shell.json"
 
 msg() { printf '%s\n' "$*"; }
 die() { printf 'Error: %s\n' "$*" >&2; exit 1; }
@@ -38,6 +41,26 @@ do_install() {
   else
     msg "keybind already present"
   fi
+  # 5. Bar icon module (absolute paths: the shell's run() must not depend on PATH).
+  bash -n "$BAR_SCRIPT_SRC" || die "bar status script has syntax errors"
+  mkdir -p "$HOME_DIR/.config/omarchy/bar/scripts"
+  install -m755 "$BAR_SCRIPT_SRC" "$BAR_SCRIPT_DST"
+  cmp -s "$BAR_SCRIPT_SRC" "$BAR_SCRIPT_DST" || die "copy to $BAR_SCRIPT_DST failed to verify"
+  python3 - "$SHELL_JSON" <<'EOF'
+import json, sys
+p = sys.argv[1]
+d = json.load(open(p))
+lay = d["bar"]["layout"]
+if not any(m.get("id") == "ente-auth" for s in lay.values() for m in s):
+    lay["right"].append({"id": "ente-auth", "type": "command",
+        "exec": "~/.config/omarchy/bar/scripts/ente-auth-status",
+        "interval": 2, "tooltip": "Ente Auth",
+        "onClick": "/home/alberto/.local/bin/ente-auth-dropdown toggle"})
+    json.dump(d, open(p, "w"), indent=2)
+    print("bar module added to shell.json")
+else:
+    print("bar module already present")
+EOF
   hyprctl reload
   sleep 1
   errs="$(hyprctl configerrors 2>&1)" || true
@@ -49,9 +72,19 @@ do_install() {
 }
 
 do_uninstall() {
-  rm -f "$BIN_DST" "$RULES_DST"
+  rm -f "$BIN_DST" "$RULES_DST" "$BAR_SCRIPT_DST"
   [ -f "$BIND_LUA" ] && sed -i "/$BIND_BEGIN/,/$BIND_END/d" "$BIND_LUA"
   [ -f "$HYPR_LUA" ] && sed -i "/$HOOK_LINE/d; /hypr\/ente-auth.lua/d" "$HYPR_LUA"
+  python3 - "$SHELL_JSON" <<'EOF'
+import json, sys
+p = sys.argv[1]
+d = json.load(open(p))
+lay = d["bar"]["layout"]
+for s in lay.values():
+    s[:] = [m for m in s if m.get("id") != "ente-auth"]
+json.dump(d, open(p, "w"), indent=2)
+print("bar module removed from shell.json")
+EOF
   hyprctl reload
   msg "Uninstalled."
 }

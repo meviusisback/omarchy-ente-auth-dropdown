@@ -20,6 +20,13 @@ Lo script chiede solo al compositor se la finestra esiste.
 Chiusura: premi di nuovo `SUPER + E` (oppure `Esc` a lista visibile: chiude il pannello). Se hai `special_fallthrough` attivo
 (lo imposta già il plugin dropdown-terminal), basta anche cliccare fuori.
 
+## Icona nella top bar
+
+Un lucchetto in fondo a destra: click = stesso toggle (`SUPER + E`).
+L'icona si accende quando il dropdown è visibile. Aggiunta da `install.sh`
+come modulo `command` in `shell.json` (sezione `right`); lo stato viene
+rilevato ogni 2s senza segreti né rete.
+
 ## Installazione
 
 ./install.sh
@@ -28,8 +35,9 @@ Fa, in modo idempotente (blocchi marcati, mai duplicati):
 1. copia `ente-auth-dropdown` in `~/.local/bin/` (modo 755, verificato con `cmp`)
 2. copia `hypr/ente-auth.lua` in `~/.config/hypr/`
 3. aggiunge l'hook di caricamento in `~/.config/hypr/hyprland.lua`
-4. aggiunge il keybind in `~/.config/hypr/bindings.lua`
-5. `hyprctl reload` + controllo `hyprctl configerrors`
+4. aggiunge il keybind `SUPER + E` in `~/.config/hypr/bindings.lua`
+5. installa il modulo icona (`bar/scripts/ente-auth-status` + voce in `shell.json`)
+6. `hyprctl reload` + controllo `hyprctl configerrors`
 
 ## Disinstallazione
 
