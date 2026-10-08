@@ -109,9 +109,10 @@ Panel {
     }
   }
 
-  // Watchdog: worst legitimate toggle is ~33s (15s launch wait + bounded
-  // snapshot reads + show retries). Past 45s the action is stuck: terminate it
-  // and recover instead of leaving the button disabled with polling suspended.
+  // Watchdog: worst legitimate toggle is ~33s under a responsive compositor
+  // (15s launch wait + bounded snapshot reads + show retries). Past 45s the
+  // action is treated as stuck: terminate it and recover instead of leaving
+  // the button disabled with polling suspended.
   Timer {
     id: toggleWatchdog
     interval: 45000

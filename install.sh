@@ -18,6 +18,9 @@ BIND_LUA="$HOME_DIR/.config/hypr/bindings.lua"
 # by uninstall if a previous install left it behind. Never installed anymore
 # (the bar icon is the plugin widget now).
 BAR_SCRIPT_DST="$HOME_DIR/.config/omarchy/bar/scripts/ente-auth-status"
+msg() { printf '%s\n' "$*"; }
+die() { printf 'Error: %s\n' "$*" >&2; exit 1; }
+
 BIND_BEGIN="-- BEGIN $MARKER"
 BIND_END="-- END $MARKER"
 # Lua-escape the bind path: a quote/backslash in $HOME must not break the string.
@@ -30,9 +33,6 @@ case "$BIN_DST" in
 esac
 HOOK_LINE="-- Added by the $MARKER script: installs the Ente Auth dropdown window rules."
 HOOK_DO="do local path = (os.getenv(\"XDG_CONFIG_HOME\") or os.getenv(\"HOME\") .. \"/.config\") .. \"/hypr/ente-auth.lua\"; local file = io.open(path, \"r\"); if file then file:close(); dofile(path) end end"
-
-msg() { printf '%s\n' "$*"; }
-die() { printf 'Error: %s\n' "$*" >&2; exit 1; }
 
 HYPRCTL="$(command -v hyprctl)" || die "hyprctl not found"
 SLEEP="$(command -v sleep)" || die "sleep not found"
