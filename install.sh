@@ -60,7 +60,14 @@ try:
 except (OSError, ValueError):
     print("legacy migration skipped: shell.json unreadable")
     raise SystemExit(0)
-lay = d.get("bar", {}).get("layout", {})
+if not isinstance(d, dict):
+    print("legacy migration skipped: unexpected shell.json shape")
+    raise SystemExit(0)
+bar = d.get("bar", {})
+lay = bar.get("layout", {}) if isinstance(bar, dict) else {}
+if not isinstance(lay, dict):
+    print("legacy migration skipped: unexpected shell.json shape")
+    raise SystemExit(0)
 removed = False
 for s in lay.values():
     if not isinstance(s, list):
@@ -71,6 +78,10 @@ for s in lay.values():
         removed = True
 if removed:
     tmp = p + ".tmp"
+    try:
+        os.unlink(tmp)  # stale interrupt leftover; unlink never follows links
+    except OSError:
+        pass
     fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o644)
     with os.fdopen(fd, "w") as h:
         json.dump(d, h, indent=2)
@@ -147,6 +158,10 @@ def rewrite(path, keep):
     if len(kept) == len(lines):
         return False
     tmp = path + ".tmp"
+    try:
+        os.unlink(tmp)  # stale interrupt leftover; unlink never follows links
+    except OSError:
+        pass
     fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o644)
     with os.fdopen(fd, "w") as h:
         h.writelines(kept)
@@ -176,6 +191,10 @@ def drop_block(path):
     if not changed:
         return False
     tmp = path + ".tmp"
+    try:
+        os.unlink(tmp)  # stale interrupt leftover; unlink never follows links
+    except OSError:
+        pass
     fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o644)
     with os.fdopen(fd, "w") as h:
         h.writelines(out)

@@ -15,6 +15,9 @@ Panel {
   ipcTarget: "meviusisback.ente-auth"
   manageIpc: false
 
+  // Residual sizing note: root takes implicit size from the button while the
+  // button fills root. Benign (implicit size stays intrinsic, same pattern as
+  // the reference widget) but resizes may log binding-loop warnings.
   implicitWidth: button.implicitWidth
   implicitHeight: button.implicitHeight
 
@@ -79,7 +82,10 @@ Panel {
     stderr: StdioCollector {
     }
     // Recovery if the poll itself fails to spawn or exit: never wedge the icon.
-    onExited: root.authedVisible = false
+    // Success keeps the parsed value; only a real failure clears to inactive.
+    onExited: function(exitCode) {
+      if (exitCode !== 0) root.authedVisible = false
+    }
   }
 
   Process {
@@ -103,12 +109,12 @@ Panel {
     }
   }
 
-  // Watchdog: a toggle normally finishes in well under 20s (15s launch wait +
-  // retries). Past that the action is stuck: terminate it and recover instead
-  // of leaving the button disabled with polling suspended forever.
+  // Watchdog: worst legitimate toggle is ~33s (15s launch wait + bounded
+  // snapshot reads + show retries). Past 45s the action is stuck: terminate it
+  // and recover instead of leaving the button disabled with polling suspended.
   Timer {
     id: toggleWatchdog
-    interval: 20000
+    interval: 45000
     repeat: false
     running: root.busy
     onTriggered: {
