@@ -1,10 +1,13 @@
-# ente-auth-dropdown
+# Ente Auth dropdown
 
-Ente Auth vera (app desktop) come dropdown in sovraimpressione: icona
-sulla barra non serve — `SUPER + E` la mostra/nasconde ovunque tu sia.
+Ente Auth vera (app desktop) come dropdown in sovraimpressione: icona lucchetto
+sulla barra oppure `SUPER + E` per mostrarla/nasconderla ovunque tu sia.
 
 ## Come funziona
 
+- Widget barra (`BarWidget.qml`, plugin `meviusisback.ente-auth`): bottone icona,
+  click = toggle, stato rilevato ogni 2s. Non tocca segreti: legge solo
+  `VISIBLE=0/1` e non logga mai l'output raw.
 - `hypr/ente-auth.lua` — regola finestra: la classe `io.ente.auth` va su
   `special:ente-auth`, flottante, centrata sotto la barra (70% larghezza
   x 95% altezza del monitor).
@@ -23,27 +26,41 @@ stessa a chiudere il pannello). Se hai `special_fallthrough` attivo
 (lo imposta già il plugin dropdown-terminal, non questo script), basta anche
 cliccare fuori.
 
-## Icona nella top bar
+## Requirements
 
-Un lucchetto in fondo a destra: click = stesso toggle (`SUPER + E`).
-L'icona si accende quando il dropdown è visibile. Aggiunta da `install.sh`
-come modulo `command` in `shell.json` (sezione `right`); lo stato viene
-rilevato ogni 2s senza segreti né rete.
+- Omarchy con Hyprland 0.56+ (sintassi dispatcher Lua)
+- App desktop Ente Auth installata (`ente-auth` da AUR, comando `/usr/bin/enteauth`)
+- Nerd Font per l'icona lucchetto nella barra
 
 ## Installazione
 
+```bash
+omarchy plugin add https://github.com/meviusisback/omarchy-ente-auth-dropdown.git
+omarchy plugin enable meviusisback.ente-auth
 ./install.sh
+```
 
-Fa, in modo idempotente (blocchi marcati, mai duplicati):
+`install.sh` è idempotente (blocchi marcati, mai duplicati) e installa solo
+regola finestra + keybind:
 1. copia `ente-auth-dropdown` in `~/.local/bin/` (modo 755, verificato con `cmp`)
 2. copia `hypr/ente-auth.lua` in `~/.config/hypr/`
 3. aggiunge l'hook di caricamento in `~/.config/hypr/hyprland.lua`
 4. aggiunge il keybind `SUPER + E` in `~/.config/hypr/bindings.lua`
-5. installa il modulo icona (`bar/scripts/ente-auth-status` + voce in `shell.json`)
-6. `hyprctl reload` + controllo `hyprctl configerrors`
+5. `hyprctl reload` + controllo `hyprctl configerrors`
 
-## Disinstallazione
+Poi posiziona il widget: `omarchy bar put meviusisback.ente-auth --section right`.
 
+## Removal
+
+```bash
 ./install.sh uninstall
+omarchy plugin disable meviusisback.ente-auth
+omarchy plugin remove meviusisback.ente-auth
+```
 
-Rimuove script, regola, hook e keybind, poi `hyprctl reload`.
+Rimuove script, regola, hook e keybind, poi `hyprctl reload`. Resta solo un
+backup `shell.json.bak` se creato (cancellalo a mano se non serve).
+
+## License
+
+MIT — vedi `LICENSE`.
