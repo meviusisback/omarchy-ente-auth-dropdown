@@ -1,9 +1,18 @@
 #!/usr/bin/env bash
 # ente-auth-dropdown — toggle the real Ente Auth desktop app as a dropdown overlay.
 #
-# No secrets, no network, no parsing of untrusted data: this script only asks the
-# compositor whether a window with our fixed class exists and shows/hides the
-# special workspace. The Ente app itself owns the login, the E2EE sync and the codes.
+# No secrets, no network: this script asks the compositor for its window list,
+# treats a window as Ente only when its class matches AND /proc/<pid>/exe is
+# an executable named enteauth from a root-owned prefix, and shows/hides the
+# special workspace. The Ente app itself owns the login, the E2EE sync and
+# the codes.
+#
+# Auto-close: the `watch` verb listens for Wayland clipboard selection changes and
+# hides the dropdown when a code is picked inside Ente (that copy is the only
+# signal the app gives us). The payload is never read into a variable, stored or
+# logged — only its byte count is inspected to tell a copy from Ente's own
+# clipboard clearing. The watcher reads the clipboard EVENT only: neither the
+# code nor a hash of it is ever stored, logged or passed on.
 #
 # argv-only exec; single fixed class/workspace constants below, never external input.
 set -euo pipefail
@@ -16,13 +25,20 @@ LAUNCH="/usr/bin/enteauth"   # AUR ente-auth; absolute path, no PATH lookup
 # only, no command -v, no sleep, no python, no HYPRCTL resolution. Prints
 # exactly one line, VISIBLE=[01]; any failure degrades to VISIBLE=0.
 # (Mirrors the WS constant below; keep the literal in step with it.)
+# Every assignment is guarded (if ! ...; then out="") so set -e can never
+# abort this verb: hyprctl failing, exiting non-zero or dying on SIGPIPE at
+# the 64KB cap must still print VISIBLE=0 with exit 0.
 if [ "${1:-toggle}" = "status" ]; then
   out=""
   if [ -x /usr/bin/hyprctl ]; then
     if [ -x /usr/bin/timeout ]; then
-      out="$(/usr/bin/timeout 2 /usr/bin/hyprctl monitors -j 2>/dev/null | /usr/bin/head -c 65536)"
+      if ! out="$(/usr/bin/timeout 2 /usr/bin/hyprctl monitors -j 2>/dev/null | /usr/bin/head -c 65536)"; then
+        out=""
+      fi
     else
-      out="$(/usr/bin/hyprctl monitors -j 2>/dev/null | /usr/bin/head -c 65536)"
+      if ! out="$(/usr/bin/hyprctl monitors -j 2>/dev/null | /usr/bin/head -c 65536)"; then
+        out=""
+      fi
     fi
   fi
   case "$out" in
@@ -37,23 +53,171 @@ die() { printf 'Error: %s\n' "$*" >&2; exit 1; }
 # Fixed absolute binaries on EVERY path: the widget spawns this script under
 # env -i, so no PATH lookup may happen here (bash would fall back to a compiled
 # default PATH, but an explicit path leaves no room for hijack).
-for _t in /usr/bin/hyprctl /usr/bin/sleep /usr/bin/python3 /usr/bin/timeout /usr/bin/head; do
+for _t in /usr/bin/hyprctl /usr/bin/sleep /usr/bin/python3 /usr/bin/timeout /usr/bin/head /usr/bin/flock /usr/bin/wc /usr/bin/id /usr/bin/mkdir /usr/bin/cat /usr/bin/dirname /usr/bin/basename /usr/bin/stat /usr/bin/chmod /usr/bin/rm; do
   [ -x "$_t" ] || die "missing trusted tool: $_t"
 done
 HYPRCTL=/usr/bin/hyprctl
 SLEEP=/usr/bin/sleep
 PYTHON3=/usr/bin/python3
 TIMEOUT_BIN=/usr/bin/timeout
+FLOCK=/usr/bin/flock
+WC=/usr/bin/wc
+# Identity rule (single shared predicate `ente_identity` below): a window is
+# Ente iff class is "io.ente.auth" AND /proc/<pid>/exe (minus one trailing
+# " (deleted)", the in-place-upgrade shape) resolves to enteauth|ente-auth
+# under /usr/, /opt/, /var/lib/flatpak/ or /snap/, root-owned, not
+# group/other-writable and executable. ENTE_AUTH_EXE is ignored unless ENTE_AUTH_TEST=1 is also set, which accepts it as an extra path (tests only; the widget never forwards either).
+ENTE_EXE="${ENTE_AUTH_EXE:-$LAUNCH}"
+# wl-clipboard is an extra package: the toggle must keep working without it, so
+# the watcher (and only the watcher) refuses to start when it is missing.
+WLPASTE=/usr/bin/wl-paste
 
-# Bounded compositor read shared by the toggle path (same discipline as the
-# status verb): 2s deadline, 64KB cap, failures degrade to empty.
-hypr_cap() {
-  "$TIMEOUT_BIN" 2 "$HYPRCTL" "$@" 2>/dev/null | /usr/bin/head -c 65536
+# Auto-close watcher state: a private subdirectory of the runtime dir (0700),
+# so nothing we create outlives the session and the "repair" chmod below only
+# ever touches our own directory, never the whole $XDG_RUNTIME_DIR. Falls back
+# to a uid-scoped /tmp dir when XDG_RUNTIME_DIR is unset.
+STATE_BASE="${XDG_RUNTIME_DIR:-/tmp/ente-auth-dropdown.$(/usr/bin/id -u)}"
+STATE_DIR="$STATE_BASE/ente-auth-dropdown"
+WATCH_LOCK="$STATE_DIR/ente-auth-dropdown.watch.lock"
+WATCH_PID="$STATE_DIR/ente-auth-dropdown.watch.pid"
+PREV_WINDOW_FILE="$STATE_DIR/ente-auth-dropdown.prev-window"
+
+# The state dir holds the lock/pid/event files and the focus-restore target,
+# all opened with plain truncating redirection (which follows a planted
+# symlink). The dir itself must therefore be attacker-proof: a real directory
+# (never a symlink), owned by our uid, mode 0700. A wrong mode on a dir we own
+# is repaired with chmod instead of refused: refusing would kill the watcher
+# for users whose dir an older install created more openly.
+state_dir_ok() {
+  local _d="$1" _owner _mode
+  [ -n "$_d" ] && [ -d "$_d" ] && [ ! -L "$_d" ] || return 1
+  _owner="$(/usr/bin/stat -c %u -- "$_d" 2>/dev/null)" || return 1
+  [ "$_owner" = "$(/usr/bin/id -u)" ] || return 1
+  _mode="$(/usr/bin/stat -c %a -- "$_d" 2>/dev/null)" || return 1
+  [ "$_mode" = "700" ] || return 1
+  return 0
+}
+ensure_state_dir() {
+  [ ! -L "$STATE_BASE" ] || return 1
+  [ ! -L "$STATE_DIR" ] || return 1
+  [ -d "$STATE_DIR" ] || /usr/bin/mkdir -p -m 700 -- "$STATE_DIR" || return 1
+  if ! state_dir_ok "$STATE_DIR"; then
+    /usr/bin/chmod 700 -- "$STATE_DIR" 2>/dev/null || return 1
+    state_dir_ok "$STATE_DIR" || return 1
+  fi
+  # Belt and braces: never truncate-open a state file that is already a link.
+  [ ! -L "$WATCH_LOCK" ] || return 1
+  [ ! -L "$WATCH_PID" ] || return 1
+  [ ! -L "$PREV_WINDOW_FILE" ] || return 1
+  [ ! -L "$WATCH_LOCK.event" ] || return 1
+  return 0
 }
 
-# Prints: VISIBLE=<0|1> PRESENT=<0|1> where VISIBLE = special:WS shown somewhere.
-# Literals mirror the WS/APP_CLASS constants; matching is glob on capped
-# output, never eval.
+# Bounded compositor read shared by the toggle path (same discipline as the
+# status verb): 2s deadline, 64KB cap, failures degrade to empty. Always exits
+# 0 (|| true) so set -e can never abort a caller on a dead compositor.
+hypr_cap() {
+  "$TIMEOUT_BIN" 2 "$HYPRCTL" "$@" 2>/dev/null | /usr/bin/head -c 65536 || true
+}
+
+# Single shared identity predicate: python reads the compositor JSON on stdin
+# and prints the verdict for MODE ("${1:-present}"). present: clients list ->
+# 1/0; where: clients list -> "<workspace> <address>"; active: activewindow
+# object -> 1/0. A window is Ente iff class is "io.ente.auth" AND
+# /proc/<pid>/exe (minus one trailing " (deleted)", the in-place-upgrade
+# shape) resolves to enteauth|ente-auth under /usr/, /opt/,
+# /var/lib/flatpak/ or /snap/, root-owned, not group/other-writable and
+# executable; anything else (missing/non-integer pid, ENOENT, EACCES, bad
+# JSON) reads as not Ente (fail closed). The environment sits on the CONSUMER
+# (this python), never on a pipeline producer, so piping into these helpers
+# keeps the rule live.
+ente_identity() {
+  APP="$APP_CLASS" ENTE_EXE="$ENTE_EXE" "$PYTHON3" -c 'import json,os,sys
+mode = sys.argv[1] if len(sys.argv) > 1 else "present"
+want = os.environ.get("APP", "")
+test_extra = None
+if os.environ.get("ENTE_AUTH_TEST") == "1":
+  _exe = os.environ.get("ENTE_EXE", "")
+  if _exe:
+    test_extra = os.path.realpath(_exe)
+PREFIXES = ("/usr/", "/opt/", "/var/lib/flatpak/", "/snap/")
+NAMES = ("enteauth", "ente-auth")
+def is_ente(c):
+  try:
+    if not (isinstance(c, dict) and c.get("class") == want and want):
+      return False
+    pid = c.get("pid")
+    if isinstance(pid, bool) or not isinstance(pid, int) or pid <= 0:
+      return False
+    link = os.readlink("/proc/%d/exe" % pid)
+    deleted = link.endswith(" (deleted)")
+    if deleted:
+      link = link[:-len(" (deleted)")]
+    real = os.path.realpath(link)
+    if test_extra is not None and real == test_extra:
+      pass
+    else:
+      if os.path.basename(real) not in NAMES:
+        return False
+      if not real.startswith(PREFIXES):
+        return False
+    # A running app upgraded under itself keeps "(deleted)" on its exe path
+    # while the inode is still alive: stat it through /proc/<pid>/exe, which
+    # still resolves. Anything else stats the resolved path.
+    st = os.stat(("/proc/%d/exe" % pid) if deleted else real)
+    if st.st_uid != 0:
+      return False
+    if st.st_mode & 0o022:
+      return False
+    if not (st.st_mode & 0o111):
+      return False
+    return True
+  except Exception:
+    return False
+if mode == "active":
+  try:
+    d = json.load(sys.stdin)
+  except Exception:
+    d = None
+  print(1 if is_ente(d) else 0)
+else:
+  try:
+    data = json.load(sys.stdin)
+  except Exception:
+    data = []
+  if mode == "where":
+    ws, addr = "none", ""
+    if isinstance(data, list):
+      for c in data:
+        if is_ente(c):
+          ws = (c.get("workspace") or {}).get("name", "") or "none"
+          a = c.get("address")
+          if isinstance(a, str) and a.startswith("0x"):
+            addr = a
+          break
+    print("%s %s" % (ws, addr))
+  else:
+    found = 0
+    if isinstance(data, list):
+      for c in data:
+        if is_ente(c):
+          found = 1
+          break
+    print(1 if found else 0)' "${1:-present}" 2>/dev/null
+}
+
+# Prints 1 when the clients JSON on stdin holds a window that is provably
+# Ente (class + executable named enteauth from a root-owned prefix, never a
+# substring match on the raw JSON), else 0. A spoofed class or title, a
+# missing/non-integer/unreadable pid and unparseable JSON all read as 0.
+ente_present() {
+  ente_identity present 2>/dev/null || true
+}
+
+# Prints: VISIBLE=<0|1> PRESENT=<0|1> where VISIBLE = special:WS shown
+# somewhere, PRESENT = provably-Ente window running (class + executable named
+# enteauth from a root-owned prefix, never a substring match on the raw JSON).
+# Output is fixed-format; never eval.
 snapshot() {
   local mon cli
   mon="$(hypr_cap monitors -j)"
@@ -62,34 +226,33 @@ snapshot() {
     *'"name":'*'"special:ente-auth"'*) VISIBLE=1 ;;
     *) VISIBLE=0 ;;
   esac
-  case "$cli" in
-    *'"class":'*'"io.ente.auth"'*) PRESENT=1 ;;
-    *) PRESENT=0 ;;
+  PRESENT=0
+  case "$(printf '%s' "$cli" | ente_present)" in
+    1) PRESENT=1 ;;
   esac
   printf 'VISIBLE=%s PRESENT=%s\n' "$VISIBLE" "$PRESENT"
 }
 
-# Workspace name of the running Ente window ("none" if absent/unreadable).
-window_ws() {
-  APP="$APP_CLASS" hypr_cap clients -j | "$PYTHON3" -c 'import json,os,sys
-want = os.environ.get("APP", "")
-try:
-  data = json.load(sys.stdin)
-except Exception:
-  print("none"); raise SystemExit
-for c in data:
-  if isinstance(c, dict) and c.get("class") == want:
-    print((c.get("workspace") or {}).get("name", "") or "none")
-    break
-else:
-  print("none")' 2>/dev/null || echo none
+# Prints "<workspace> <address>" of the verified Ente window ("none " when
+# absent/unreadable). Reads the clients JSON on stdin; the address lets
+# pull_into_special move exactly the verified window instead of the first
+# class match.
+ente_where() {
+  ente_identity where 2>/dev/null || echo "none "
 }
 
-# Pull a stray Ente window (running outside our special workspace) into it.
-# Best-effort: float/size come from the window rule at first map, so a window
-# that was already open keeps its tiling until the app is relaunched.
+# Pull a stray Ente window (running outside our special workspace) into it by
+# ADDRESS: the caller passes the address ente_where verified, so a spoofed
+# class/title can never be moved here. Best-effort: float/size come from the
+# window rule at first map, so a window that was already open keeps its tiling
+# until the app is relaunched.
 pull_into_special() {
-  "$HYPRCTL" eval 'local t; for _, w in ipairs(hl.get_windows()) do if w.class == "io.ente.auth" then t = w; break end end; if t then hl.dispatch(hl.dsp.window.move({ window = t, workspace = "special:ente-auth" })) end' >/dev/null 2>&1 || true
+  case "$1" in
+    0x*[!0-9a-fA-F]*) return 0 ;;   # hex garbage: refuse
+    0x?*) ;;
+    *) return 0 ;;                   # empty/missing: move nothing
+  esac
+  "$HYPRCTL" eval "local t; for _, w in ipairs(hl.get_windows()) do if w.address == \"$1\" then t = w; break end end; if t then hl.dispatch(hl.dsp.window.move({ window = t, workspace = \"special:ente-auth\" })) end" >/dev/null 2>&1 || true
 }
 
 # NOTE: dispatcher form for Hyprland 0.56 Lua engine (legacy
@@ -103,6 +266,7 @@ toggle_ws() {
 # Show with verification: a stale monitors read must never flip into a hide.
 show_ws() {
   local i
+  record_prev        # focus target for the auto-close path (see restore_focus)
   for i in 1 2 3; do
     toggle_ws
     "$SLEEP" 0.4
@@ -112,21 +276,232 @@ show_ws() {
   die "could not show the dropdown (still hidden after 3 tries)"
 }
 
-# Hide with verification: retry while a fresh read still says visible.
+# Hide with verification: retry while a fresh read still says visible. Focus
+# restore runs on the success path only: hiding a special workspace already
+# returns focus to the previous window, so this is the safety net, not the norm.
 hide_ws() {
   local i
   for i in 1 2 3; do
     toggle_ws
     "$SLEEP" 0.4
     eval "$(snapshot)"
-    [ "$VISIBLE" = "0" ] && return 0
+    [ "$VISIBLE" = "0" ] && { restore_focus; return 0; }
   done
   die "could not hide the dropdown (still visible after 3 tries)"
 }
 
+# ---------------------------------------------------------------------------
+# Auto-close on pick: Ente Auth offers the OTP to the Wayland clipboard when a
+# code is clicked, and that selection change is the only signal a foreign app
+# gives us. The watcher therefore reads the clipboard EVENT only: the payload
+# is piped straight into `wc -c`, so neither the code nor a hash of it is ever
+# stored, logged or passed on. Nothing here prints the content.
+
+# Absolute path of this script, used as the wl-paste --watch command. Every
+# binary is absolute: the widget spawns us under env -i, so PATH is not trusted.
+self_path() {
+  local d
+  d="$(cd -- "$(/usr/bin/dirname -- "${BASH_SOURCE[0]}")" 2>/dev/null && pwd -P)" || return 1
+  printf '%s/%s\n' "$d" "$(/usr/bin/basename -- "${BASH_SOURCE[0]}")"
+}
+
+# Prints 1 when the focused window is provably Ente (class + executable named
+# enteauth from a root-owned prefix), else 0. Reads the activewindow object on
+# stdin. Never fails, never prints anything else: safe inside [ ... = "1" ].
+active_is_ente() {
+  ente_identity active 2>/dev/null || true
+}
+
+# Address of the focused window, empty when that window IS the Ente window:
+# a self-referential "previous window" would be useless for focus restore.
+prev_address() {
+  APP="$APP_CLASS" "$PYTHON3" -c 'import json,os,sys
+try:
+  d = json.load(sys.stdin)
+except Exception:
+  raise SystemExit(0)
+if not isinstance(d, dict) or d.get("class") == os.environ.get("APP"):
+  raise SystemExit(0)
+a = d.get("address")
+if isinstance(a, str) and a.startswith("0x"):
+  print(a)' 2>/dev/null || true
+}
+
+# Remember where focus was before the dropdown opens, so an auto-close can put
+# it back even if the compositor leaves it on the hidden Ente window. The old
+# target is cleared first: when no fresh address can be recorded there must be
+# no stale address left for a later auto-close to reuse.
+record_prev() {
+  local addr
+  /usr/bin/rm -f -- "$PREV_WINDOW_FILE" 2>/dev/null || true
+  ensure_state_dir 2>/dev/null || return 0
+  addr="$(hypr_cap activewindow -j | prev_address)"
+  case "$addr" in
+    0x*) printf '%s\n' "$addr" > "$PREV_WINDOW_FILE" 2>/dev/null || true ;;
+  esac
+}
+
+# Only acts when focus is still stuck on the (now hidden) verified Ente
+# window. The address is re-validated here and never interpolated raw into
+# Lua. Single-use: the file is dropped once read, so a stale address can
+# never trigger a second restore.
+restore_focus() {
+  local is_ente addr
+  is_ente="$(hypr_cap activewindow -j | active_is_ente)"
+  [ "$is_ente" = "1" ] || return 0
+  ensure_state_dir 2>/dev/null || return 0
+  addr="$(/usr/bin/head -c 64 -- "$PREV_WINDOW_FILE" 2>/dev/null || true)"
+  /usr/bin/rm -f -- "$PREV_WINDOW_FILE" 2>/dev/null || true
+  case "$addr" in
+    0x*[!0-9a-fA-F]*) return 0 ;;   # not a plain hex address: refuse
+    0x?*) ;;
+    *) return 0 ;;
+  esac
+  "$HYPRCTL" eval "local t; for _, w in ipairs(hl.get_windows()) do if w.address == \"$addr\" then hl.dispatch(hl.dsp.focus({ window = w })); break end end" >/dev/null 2>&1 || true
+}
+
+# wl-paste --watch child. stdin carries the new selection.
+clipboard_event() {
+  local n is_ente
+  ensure_state_dir 2>/dev/null || return 0
+  # Try-lock: two near-simultaneous selection events (a plain event plus a
+  # clipboard manager re-offering it) must not both toggle, or the second one
+  # would re-show what the first just hid.
+  { exec 8>"$WATCH_LOCK.event"; } 2>/dev/null || return 0
+  "$FLOCK" -n 8 || exit 0
+  # Deadline: stdin stays open until the offering client closes it, and a
+  # client that never closes pins this handler (and its event lock) forever.
+  # A 5 s timeout therefore reads as "unknown" (no toggle, lock released on
+  # return), same as empty/garbage, and the handler exits quickly either way.
+  if ! n="$("$TIMEOUT_BIN" 5 "$WC" -c 2>/dev/null)"; then
+    n=""
+  fi
+  n="${n//[[:space:]]/}"
+  case "$n" in
+    ''|0|*[!0-9]*) return 0 ;;   # empty selection = Ente clearing its clipboard
+  esac
+  # Only a pick made with the verified Ente window focused closes the
+  # dropdown: a copy anywhere else (browser, password manager) must not
+  # touch it, and a spoofed class/title must not either.
+  is_ente="$(hypr_cap activewindow -j | active_is_ente)"
+  [ "$is_ente" = "1" ] || return 0
+  eval "$(snapshot)"
+  [ "$VISIBLE" = "1" ] || return 0
+  hide_ws
+}
+
+# Exact-argv process matchers (no substring matching on the joined cmdline, so
+# an `exec -a` decoy whose argv[0] merely contains our path never matches).
+# _argv reads /proc/<pid>/cmdline NUL-split into the named array, dropping the
+# trailing empty element the final NUL leaves behind.
+_argv() {
+  local -n _arr="$2"
+  _arr=()
+  [ -r "/proc/$1/cmdline" ] || return 1
+  mapfile -d '' _arr < "/proc/$1/cmdline" 2>/dev/null || true
+  [ "${#_arr[@]}" -gt 0 ] || return 1
+  if [ -z "${_arr[-1]}" ]; then unset '_arr[-1]'; fi
+  [ "${#_arr[@]}" -gt 0 ]
+}
+
+# 0 iff pid is this install's watcher shell: argv [<shell>, <self>, watch].
+is_watcher_argv() {
+  local _a=()
+  [ -n "${1:-}" ] && [ -n "${2:-}" ] || return 1
+  _argv "$1" _a || return 1
+  [ "${#_a[@]}" -eq 3 ] || return 1
+  [ "${_a[1]}" = "$2" ] && [ "${_a[2]}" = "watch" ]
+}
+
+# 0 iff pid is this install's wl-paste child: argv [wl-paste, --watch, <self>].
+is_wlpaste_argv() {
+  local _a=()
+  [ -n "${1:-}" ] && [ -n "${2:-}" ] || return 1
+  _argv "$1" _a || return 1
+  [ "${#_a[@]}" -ge 4 ] || return 1
+  case "${_a[0]}" in
+    */wl-paste|wl-paste) ;;
+    *) return 1 ;;
+  esac
+  [ "${_a[1]}" = "--watch" ] && [ "${_a[2]}" = "$2" ]
+}
+
+# Reap wl-paste --watch <self> leftovers from a violently killed watcher
+# (SIGKILL skips its trap): kill every exact-argv match except our own fresh
+# child and the child of a live watcher shell of this install (a concurrent
+# teardown still owns that one). We hold the flock here, so no other live
+# watcher of ours exists: anything else with our exact argv is a leftover,
+# whether init/subreaper-reparented (ppid 1 or a supervisor) or carrying a
+# recycled parent pid that can no longer own it.
+reap_orphan_wlpaste() {
+  local _self="$1" _p _pid _ppid _ln _a=()
+  [ -n "$_self" ] || return 0
+  for _p in /proc/[0-9]*; do
+    _pid="${_p#/proc/}"
+    case "$_pid" in ''|*[!0-9]*) continue ;; esac
+    [ "$_pid" != "$$" ] || continue
+    is_wlpaste_argv "$_pid" "$_self" || continue
+    _ppid=""
+    while IFS= read -r _ln; do
+      case "$_ln" in
+        PPid:*) _ppid="${_ln#PPid:}"; _ppid="${_ppid//[[:space:]]/}"; break ;;
+      esac
+    done < "/proc/$_pid/status" 2>/dev/null || continue
+    [ -n "$_ppid" ] || continue
+    if [ "$_ppid" != "$$" ] && ! is_watcher_argv "$_ppid" "$_self"; then
+      kill "$_pid" 2>/dev/null || true
+    fi
+  done
+  return 0
+}
+# Long-running singleton: started by the compositor (hypr/ente-auth.lua) at
+# startup and after every config reload, and by install.sh. flock keeps reloads
+# from stacking watchers; the pid file lets uninstall stop the live one.
+watch_loop() {
+  local self
+  [ -x "$WLPASTE" ] || die "missing trusted tool: $WLPASTE (install wl-clipboard)"
+  self="$(self_path)" || die "cannot resolve this script's own path"
+  ensure_state_dir || die "unsafe state dir: $STATE_DIR"
+  exec 9>"$WATCH_LOCK" || die "cannot open lock file: $WATCH_LOCK"
+  "$FLOCK" -n 9 || exit 0          # another watcher already runs: nothing to do
+  # We hold the lock, so any pid left in the file is stale: replace it. A new
+  # start after a SIGKILL/OOM therefore heals the pid file instead of
+  # pointing stop_watcher at a recycled pid forever.
+  printf '%s\n' "$$" > "$WATCH_PID" 2>/dev/null || true
+  reap_orphan_wlpaste "$self"    # a SIGKILLED predecessor may have left its child
+  WATCH_CHILD=0
+  # Signal the child too: killing only this shell would orphan wl-paste.
+  on_watch_exit() {
+    # kill is a bash builtin (no PATH lookup); rm is not, so absolute. The
+    # || true keeps a reaped child or lost pid file from failing the trap and
+    # flipping the watcher's exit status. The pid is re-checked against our
+    # wl-paste child first, so a recycled pid is never signalled.
+    if [ "${WATCH_CHILD:-0}" -gt 0 ] 2>/dev/null; then
+      is_wlpaste_argv "$WATCH_CHILD" "$self" && kill "$WATCH_CHILD" 2>/dev/null || true
+      WATCH_CHILD=0
+    fi
+    /usr/bin/rm -f -- "$WATCH_PID" 2>/dev/null || true
+  }
+  trap 'on_watch_exit; exit 0' TERM INT
+  trap 'on_watch_exit' EXIT
+  while :; do
+    # 9>&-: the fd-9 singleton lock must not leak into the wl-paste child. If
+    # this shell dies without its traps (SIGKILL/OOM), an inheriting orphan
+    # would keep the lock and every later start would silently no-op forever.
+    "$WLPASTE" --watch "$self" clipboard-event 9>&- >/dev/null 2>&1 &
+    WATCH_CHILD=$!
+    wait "$WATCH_CHILD" || true
+    WATCH_CHILD=0                    # a later trap must not kill a recycled pid
+    "$SLEEP" 2                    # always back off: a wl-paste exiting 0 must
+                                  # not become a fork loop either
+  done
+}
+
 case "${1:-toggle}" in
   toggle) ;;
-  *) die "unknown command: $1 (only 'toggle' is supported)" ;;
+  watch) watch_loop ;;                       # long-running, never returns
+  clipboard-event) clipboard_event || true; exit 0 ;;
+  *) die "unknown command: $1 (supported: toggle, watch, clipboard-event)" ;;
 esac
 
 eval "$(snapshot)"
@@ -151,9 +526,13 @@ if [ "$PRESENT" = "0" ]; then
   # unconditional show would hide-then-reshow it (flicker).
   [ "$VISIBLE" = "0" ] && show_ws
 else
-  ws="$(window_ws)"
+  info="$(hypr_cap clients -j | ente_where)" || info="none "
+  ws="${info%% *}"
+  addr="${info#* }"
   if [ "$ws" != "none" ] && [ "$ws" != "special:$WS" ]; then
-    pull_into_special
+    case "$addr" in
+      0x*) pull_into_special "$addr" ;;   # verified address only; empty = move nothing
+    esac
     "$SLEEP" 0.3
     eval "$(snapshot)"
   fi

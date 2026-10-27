@@ -3,11 +3,11 @@
   "schemaVersion": 1,
   "id": "meviusisback.ente-auth",
   "name": "Ente Auth dropdown",
-  "version": "1.0.0",
+  "version": "1.1.2",
   "author": "meviusisback",
   "license": "MIT",
   "repository": "https://github.com/meviusisback/omarchy-ente-auth-dropdown",
-  "description": "Real Ente Auth desktop app as a dropdown overlay: bar lock icon plus SUPER+E toggle on a special workspace. Login, E2EE sync and codes stay inside Ente Auth.",
+  "description": "Real Ente Auth desktop app as a dropdown overlay: bar lock icon plus toggle on a special workspace (the SUPER+E keybind is installed by install.sh, no code reads a keybind default). Auto-close and best-effort focus restore when a code is picked need wl-clipboard and one install.sh run. Login, E2EE sync and codes stay inside Ente Auth.",
   "kinds": [
     "bar-widget"
   ],
@@ -18,9 +18,6 @@
     "displayName": "Ente Auth",
     "description": "Toggle the Ente Auth app dropdown (special workspace).",
     "category": "Productivity",
-    "allowMultiple": false,
-    "defaults": {
-      "keybind": "SUPER + E"
-    }
+    "allowMultiple": false
   }
 }
