@@ -71,6 +71,10 @@ ENTE_EXE="${ENTE_AUTH_EXE:-$LAUNCH}"
 # wl-clipboard is an extra package: the toggle must keep working without it, so
 # the watcher (and only the watcher) refuses to start when it is missing.
 WLPASTE=/usr/bin/wl-paste
+# Optional helpers (used only when present): resolved-path comparison for the
+# wl-paste child, so a foreign binary with the same name is never reaped.
+READLINK_BIN=/usr/bin/readlink
+REALPATH_BIN=/usr/bin/realpath
 
 # Auto-close watcher state: a private subdirectory of the runtime dir (0700),
 # so nothing we create outlives the session and the "repair" chmod below only
@@ -417,7 +421,7 @@ is_watcher_argv() {
 
 # 0 iff pid is this install's wl-paste child: argv [wl-paste, --watch, <self>].
 is_wlpaste_argv() {
-  local _a=()
+  local _a=() _exe=""
   [ -n "${1:-}" ] && [ -n "${2:-}" ] || return 1
   _argv "$1" _a || return 1
   [ "${#_a[@]}" -ge 4 ] || return 1
@@ -425,6 +429,19 @@ is_wlpaste_argv() {
     */wl-paste|wl-paste) ;;
     *) return 1 ;;
   esac
+  # Same binary check as install.sh: a foreign binary that merely carries the
+  # name wl-paste must not be reaped. Skipped when readlink is unavailable.
+  if [ -x "$READLINK_BIN" ]; then
+    _exe="$("$READLINK_BIN" -- "/proc/$1/exe" 2>/dev/null)" || return 1
+    case "$_exe" in
+      *" (deleted)") _exe="${_exe% (deleted)}" ;;
+    esac
+    if [ -x "$REALPATH_BIN" ]; then
+      _exe="$("$REALPATH_BIN" -m -- "$_exe" 2>/dev/null || printf '%s' "$_exe")"
+      _wp="$("$REALPATH_BIN" -m -- "$WLPASTE" 2>/dev/null || printf '%s' "$WLPASTE")"
+      [ "$_exe" = "$_wp" ] || return 1
+    fi
+  fi
   [ "${_a[1]}" = "--watch" ] && [ "${_a[2]}" = "$2" ]
 }
 
@@ -502,7 +519,7 @@ watch_loop() {
 case "${1:-toggle}" in
   toggle) ;;
   watch) watch_loop ;;                       # long-running, never returns
-  clipboard-event) clipboard_event || true; exit 0 ;;
+  clipboard-event) ( clipboard_event ) ; exit 0 ;;
   *) die "unknown command: $1 (supported: toggle, watch, clipboard-event)" ;;
 esac
 

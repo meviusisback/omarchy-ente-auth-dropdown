@@ -80,7 +80,10 @@ regola finestra + keybind + watcher + pulizia `shell.json`:
    codice), `hyprctl reload` + controllo `hyprctl configerrors`, poi avvia il
    nuovo watcher di auto-chiusura (parte comunque da solo a ogni reload/avvio
    successivo). Un `hyprctl reload` che fallisce (SSH/TTY, sessione non viva)
-   stampa un warning e non interrompe l'installazione.
+   stampa un warning e non interrompe l'installazione: in quel caso regola
+   finestra, keybind e watcher diventano attivi solo al primo reload/login
+   riuscito. Un blocco marker `BEGIN` senza `END` (o già doppio) fa rifiutare
+   l'installazione invece di impilarne un secondo.
 
 Poi posiziona il widget: `omarchy bar put meviusisback.ente-auth --section right`.
 
@@ -96,7 +99,8 @@ Rimuove script, regola, hook e keybind, ferma il watcher, poi `hyprctl reload`.
 Restano i backup `hyprland.lua.bak` e `bindings.lua.bak` (cancellali a mano
 se non servono), le modifiche a `shell.json` (le voci legacy restano rimosse)
 e la directory di stato del watcher `$XDG_RUNTIME_DIR/ente-auth-dropdown`
-(lock/pid/prev-window: sparisce al riavvio della sessione; se `XDG_RUNTIME_DIR`
+(lock, lock degli eventi clipboard, pid e finestra-precedente: sparisce al
+riavvio della sessione; se `XDG_RUNTIME_DIR`
 non è impostato il fallback è `/tmp/ente-auth-dropdown.<uid>`, che **non**
 sparisce). Da un'installazione ≤ 1.1.0 può restare anche il vecchio lock
 `$XDG_RUNTIME_DIR/ente-auth-dropdown.watch.lock`: nessun codice lo rimuove.

@@ -76,11 +76,15 @@ READLINK_BIN=/usr/bin/readlink
 WLPASTE_BIN=/usr/bin/wl-paste
 for _t in "$HYPRCTL" "$SLEEP" "$PYTHON3" "$TR" "$ID_BIN" "$TIMEOUT_BIN" \
          "$HEAD_BIN" "$MKDIR_BIN" "$INSTALL_BIN" "$CMP_BIN" \
-         "$CP_BIN" "$MV_BIN" "$GREP_BIN" "$RM_BIN" "$MKTEMP_BIN" "$BASH_BIN" \
-         "$REALPATH_BIN" "$READLINK_BIN"; do
+         "$CP_BIN" "$MV_BIN" "$GREP_BIN" "$RM_BIN" "$MKTEMP_BIN" "$BASH_BIN"; do
   [ -x "$_t" ] || die "missing trusted tool: $_t"
 done
-BIN_DST_REAL="$("$REALPATH_BIN" -m -- "$BIN_DST" 2>/dev/null || printf '%s' "$BIN_DST")"
+# realpath/readlink are optional: absent, they degrade the canonical-path and
+# wl-paste-identity checks instead of blocking teardown on an exotic host.
+BIN_DST_REAL="$BIN_DST"
+if [ -x "$REALPATH_BIN" ]; then
+  BIN_DST_REAL="$("$REALPATH_BIN" -m -- "$BIN_DST" 2>/dev/null || printf '%s' "$BIN_DST")"
+fi
 
 # Runtime state shared with the toggle script: same subdir it computes (see
 # STATE_DIR there). Holds the watcher pid file, nothing else.
@@ -133,7 +137,13 @@ is_wlpaste_argv() {
   case "$_exe" in
     *" (deleted)") _exe="${_exe% (deleted)}" ;;   # binary upgraded under us
   esac
-  [ "$_exe" = "$WLPASTE_BIN" ] || return 1
+  # Compare RESOLVED paths (a symlinked /usr/bin/wl-paste is legitimate), and
+  # fall back to argv-only when realpath is unavailable so teardown keeps working.
+  if [ -x "$REALPATH_BIN" ]; then
+    _wp="$("$REALPATH_BIN" -m -- "$WLPASTE_BIN" 2>/dev/null || printf '%s' "$WLPASTE_BIN")"
+    _exe_r="$("$REALPATH_BIN" -m -- "$_exe" 2>/dev/null || printf '%s' "$_exe")"
+    [ "$_exe_r" = "$_wp" ] || return 1
+  fi
   { [ "${_a[1]}" = "--watch" ] && { [ "${_a[2]}" = "$2" ] || [ "${_a[2]}" = "${BIN_DST_REAL:-$2}" ]; }; }
 }
 
@@ -297,6 +307,14 @@ do_install() {
   for f in "$BIN_DST" "$RULES_DST" "$HYPR_LUA" "$BIND_LUA"; do
     refuse_link "$f"
   done
+  # Never append on top of an unterminated (or already doubled) marker block:
+  # a second block would make uninstall delete everything between the two
+  # BEGIN lines. Count, don't guess.
+  _nb="$("$GREP_BIN" -cF -- "$BIND_BEGIN" "$BIND_LUA" 2>/dev/null || true)"
+  _ne="$("$GREP_BIN" -cF -- "$BIND_END" "$BIND_LUA" 2>/dev/null || true)"
+  if [ "${_nb:-0}" != "${_ne:-0}" ] || [ "${_nb:-0}" -gt 1 ]; then
+    die "unterminated or duplicated marker block in $BIND_LUA (nothing written): fix or remove it by hand"
+  fi
   "$MKDIR_BIN" -p "$HOME_DIR/.local/bin" "$HOME_DIR/.config/hypr"
   "$INSTALL_BIN" -m755 "$REPO_DIR/ente-auth-dropdown" "$BIN_DST"
   "$CMP_BIN" -s "$REPO_DIR/ente-auth-dropdown" "$BIN_DST" || die "copy to $BIN_DST failed to verify"
@@ -305,11 +323,16 @@ do_install() {
   # Backups before the first append (only if no .bak exists yet).
   backup_once "$HYPR_LUA"
   backup_once "$BIND_LUA"
-  # Idempotence is keyed on the FULL artifact, not on the marker alone: a
-  # half-present hook (comment without the dofile line) or a stray BEGIN marker
-  # must not read as "already present" and skip the write.
-  if ! { "$GREP_BIN" -qF -- "$HOOK_LINE" "$HYPR_LUA" && "$GREP_BIN" -qF -- "$HOOK_DO" "$HYPR_LUA"; }; then
-    printf '%s\n%s\n' "$HOOK_LINE" "$HOOK_DO" >> "$HYPR_LUA"
+  # Idempotence per LINE: a half-present hook (banner without the dofile line,
+  # or the reverse) must get only the missing half, never a duplicate banner or
+  # two dofile registrations.
+  _need_line=0
+  _need_do=0
+  "$GREP_BIN" -qF -- "$HOOK_LINE" "$HYPR_LUA" || _need_line=1
+  "$GREP_BIN" -qF -- "$HOOK_DO" "$HYPR_LUA" || _need_do=1
+  if [ "$_need_line" = 1 ] || [ "$_need_do" = 1 ]; then
+    if [ "$_need_line" = 1 ]; then printf '%s\n' "$HOOK_LINE" >> "$HYPR_LUA"; fi
+    if [ "$_need_do" = 1 ]; then printf '%s\n' "$HOOK_DO" >> "$HYPR_LUA"; fi
     msg "hook added to hyprland.lua"
   else
     msg "hook already present"
@@ -411,6 +434,11 @@ def drop_block(path):
         if skip and s == END:
             skip = False
             continue
+        # A second BEGIN inside an open block means the file holds two blocks
+        # (or a hand-mangled one): refuse to guess, leave it alone. Deleting
+        # from the first BEGIN to the FIRST END would eat the user's lines.
+        if skip and (s == BEGIN or BEGIN in s and s.endswith(BEGIN)):
+            raise SystemExit(f"ambiguous marker block in {path} (second BEGIN before END); leaving it alone")
         # Tolerate an END glued onto following content the same way.
         if skip and s != END and s.startswith(END):
             rest = s[len(END):]
