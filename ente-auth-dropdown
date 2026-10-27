@@ -543,7 +543,9 @@ if [ "$PRESENT" = "0" ]; then
   [ "$PRESENT" = "0" ] && die "launch produced no $APP_CLASS window"
   # Show only if still hidden: a fast window may arrive already visible, and an
   # unconditional show would hide-then-reshow it (flicker).
-  [ "$VISIBLE" = "0" ] && show_ws
+  if [ "$VISIBLE" = "0" ]; then
+    show_ws
+  fi
 else
   info="$(hypr_cap clients -j | ente_where)" || info="none "
   ws="${info%% *}"
