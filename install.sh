@@ -18,6 +18,10 @@ BIND_LUA="$HOME_DIR/.config/hypr/bindings.lua"
 # by uninstall if a previous install left it behind. Never installed anymore
 # (the bar icon is the plugin widget now).
 BAR_SCRIPT_DST="$HOME_DIR/.config/omarchy/bar/scripts/ente-auth-status"
+# Canonical form of the installed path: the toggle publishes self_path() (pwd -P)
+# to its wl-paste child, so a symlinked $HOME gives the sweep a different string
+# than this literal one. Both forms are accepted.
+BIN_DST_REAL="$BIN_DST"
 msg() { printf '%s\n' "$*"; }
 die() { printf 'Error: %s\n' "$*" >&2; exit 1; }
 
@@ -36,9 +40,11 @@ _ESCAPED_CMD="${_ESCAPED_CMD//\"/\\\"}"
 BIND_LINE="o.bind(\"SUPER + E\", \"Toggle Ente Auth\", \"${_ESCAPED_CMD}\")"
 # A newline or carriage return in $HOME would break out of the generated Lua
 # line, and $/backticks would expand at keypress: refuse those. Spaces,
-# apostrophes and semicolons are fine (shell-quoted above).
+# apostrophes and semicolons are fine (shell-quoted above). Checked in
+# do_install only: uninstall never writes a keybind and must stay usable.
+_HOME_UNSAFE=0
 case "$BIN_DST" in
-  *'$'*|*'`'*|$'\n'*|*$'\r'*) die "HOME contains shell-active characters: refusing to write the keybind" ;;
+  *'$'*|*'`'*|*$'\n'*|*$'\r'*) _HOME_UNSAFE=1 ;;
 esac
 HOOK_LINE="-- Added by the $MARKER script: installs the Ente Auth dropdown window rules."
 HOOK_DO="do local path = (os.getenv(\"XDG_CONFIG_HOME\") or os.getenv(\"HOME\") .. \"/.config\") .. \"/hypr/ente-auth.lua\"; local file = io.open(path, \"r\"); if file then file:close(); dofile(path) end end"
@@ -62,11 +68,19 @@ GREP_BIN=/usr/bin/grep
 RM_BIN=/usr/bin/rm
 MKTEMP_BIN=/usr/bin/mktemp
 BASH_BIN=/usr/bin/bash
+REALPATH_BIN=/usr/bin/realpath
+READLINK_BIN=/usr/bin/readlink
+# The watcher's child must be the real wl-paste binary, not just something
+# called wl-paste: compared as a resolved path. Optional package, so it is not
+# in the hard preflight below.
+WLPASTE_BIN=/usr/bin/wl-paste
 for _t in "$HYPRCTL" "$SLEEP" "$PYTHON3" "$TR" "$ID_BIN" "$TIMEOUT_BIN" \
          "$HEAD_BIN" "$MKDIR_BIN" "$INSTALL_BIN" "$CMP_BIN" \
-         "$CP_BIN" "$MV_BIN" "$GREP_BIN" "$RM_BIN" "$MKTEMP_BIN" "$BASH_BIN"; do
+         "$CP_BIN" "$MV_BIN" "$GREP_BIN" "$RM_BIN" "$MKTEMP_BIN" "$BASH_BIN" \
+         "$REALPATH_BIN" "$READLINK_BIN"; do
   [ -x "$_t" ] || die "missing trusted tool: $_t"
 done
+BIN_DST_REAL="$("$REALPATH_BIN" -m -- "$BIN_DST" 2>/dev/null || printf '%s' "$BIN_DST")"
 
 # Runtime state shared with the toggle script: same subdir it computes (see
 # STATE_DIR there). Holds the watcher pid file, nothing else.
@@ -93,18 +107,21 @@ _argv() {
 }
 
 # 0 iff pid is this install's watcher shell: argv [<shell>, $BIN_DST, watch].
-# This is also how the shell is found when the pid file is missing.
+# This is also how the shell is found when the pid file is missing. The path is
+# accepted in literal and canonical form (the watcher publishes pwd -P).
 is_watcher_argv() {
   local _a=()
   [ -n "${1:-}" ] && [ -n "${2:-}" ] || return 1
   _argv "$1" _a || return 1
   [ "${#_a[@]}" -eq 3 ] || return 1
-  [ "${_a[1]}" = "$2" ] && [ "${_a[2]}" = "watch" ]
+  { [ "${_a[1]}" = "$2" ] || [ "${_a[1]}" = "${BIN_DST_REAL:-$2}" ]; } && [ "${_a[2]}" = "watch" ]
 }
 
-# 0 iff pid is this install's wl-paste child: argv [wl-paste, --watch, $BIN_DST].
+# 0 iff pid is this install's wl-paste child: argv [wl-paste, --watch, $BIN_DST]
+# AND the executable really is $WLPASTE_BIN (a foreign binary that merely
+# carries the name wl-paste must never be reaped).
 is_wlpaste_argv() {
-  local _a=()
+  local _a=() _exe=""
   [ -n "${1:-}" ] && [ -n "${2:-}" ] || return 1
   _argv "$1" _a || return 1
   [ "${#_a[@]}" -ge 4 ] || return 1
@@ -112,7 +129,12 @@ is_wlpaste_argv() {
     */wl-paste|wl-paste) ;;
     *) return 1 ;;
   esac
-  [ "${_a[1]}" = "--watch" ] && [ "${_a[2]}" = "$2" ]
+  _exe="$("$READLINK_BIN" -- "/proc/$1/exe" 2>/dev/null)" || return 1
+  case "$_exe" in
+    *" (deleted)") _exe="${_exe% (deleted)}" ;;   # binary upgraded under us
+  esac
+  [ "$_exe" = "$WLPASTE_BIN" ] || return 1
+  { [ "${_a[1]}" = "--watch" ] && { [ "${_a[2]}" = "$2" ] || [ "${_a[2]}" = "${BIN_DST_REAL:-$2}" ]; }; }
 }
 
 # Stop the live auto-close watcher. A pid-file pid is killed only when its
@@ -239,6 +261,10 @@ EOF
 do_install() {
   local f d d2 errs
   "$BASH_BIN" -n "$REPO_DIR/ente-auth-dropdown" || die "toggle script has syntax errors"
+  # The keybind line is the only generated Lua that must survive the shell at
+  # keypress: refuse an unusable $HOME before the first write (uninstall does
+  # not reach this check, so removal still works on such a host).
+  [ "$_HOME_UNSAFE" = "0" ] || die "HOME contains shell-active characters: refusing to write the keybind"
   # Pre-check everything first: configs, write permissions, backup siblings and
   # target dirs must all be good BEFORE the first write (no partial installs).
   for f in "$HYPR_LUA" "$BIND_LUA"; do
@@ -279,13 +305,16 @@ do_install() {
   # Backups before the first append (only if no .bak exists yet).
   backup_once "$HYPR_LUA"
   backup_once "$BIND_LUA"
-  if ! "$GREP_BIN" -qF -- "$HOOK_LINE" "$HYPR_LUA"; then
+  # Idempotence is keyed on the FULL artifact, not on the marker alone: a
+  # half-present hook (comment without the dofile line) or a stray BEGIN marker
+  # must not read as "already present" and skip the write.
+  if ! { "$GREP_BIN" -qF -- "$HOOK_LINE" "$HYPR_LUA" && "$GREP_BIN" -qF -- "$HOOK_DO" "$HYPR_LUA"; }; then
     printf '%s\n%s\n' "$HOOK_LINE" "$HOOK_DO" >> "$HYPR_LUA"
     msg "hook added to hyprland.lua"
   else
     msg "hook already present"
   fi
-  if ! "$GREP_BIN" -qF -- "$BIND_BEGIN" "$BIND_LUA"; then
+  if ! { "$GREP_BIN" -qF -- "$BIND_BEGIN" "$BIND_LUA" && "$GREP_BIN" -qF -- 'SUPER + E' "$BIND_LUA"; }; then
     printf '%s\n%s\n%s\n' "$BIND_BEGIN" "$BIND_LINE" "$BIND_END" >> "$BIND_LUA"
     msg "keybind added to bindings.lua"
   else
@@ -301,8 +330,10 @@ do_install() {
   # here too for the same reason as before.
   stop_watcher
   "$SLEEP" 2
-  "$HYPRCTL" reload
-  "$SLEEP" 1
+  # A failed reload (SSH/TTY, stale signature, non-Lua build) must not abort an
+  # otherwise good install: everything is already on disk and the previous
+  # watcher is already stopped, so warn and keep going to the start below.
+  "$HYPRCTL" reload 2>/dev/null || msg "warning: hyprctl reload failed (no live Hyprland?); the watcher starts at the next reload/login"
   # Auto-close watcher: hypr/ente-auth.lua starts it on config load, and we
   # spawn it here too so the feature is live right after an upgrade instead of
   # at the next login. The script's flock makes the second start a no-op.
@@ -429,7 +460,7 @@ def drop_hook_lines(path):
 print("keybind block removed:", drop_block(bind_path))
 print("hook lines removed:", drop_hook_lines(hook_path))
 EOF
-  "$HYPRCTL" reload
+  "$HYPRCTL" reload 2>/dev/null || msg "warning: hyprctl reload failed (no live Hyprland?)"
   msg "Uninstalled."
 }
 

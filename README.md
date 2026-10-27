@@ -12,10 +12,14 @@ sulla barra oppure `SUPER + E` per mostrarla/nasconderla ovunque tu sia.
   `special:ente-auth`, flottante, centrata sotto la barra (70% larghezza
   x 50% altezza del monitor). Lo stesso file avvia il watcher di auto-chiusura
   all'avvio di Hyprland e dopo ogni `hyprctl reload`.
-- `ente-auth-dropdown` — script di toggle: riconosce l'app solo se la classe è
-  `io.ente.auth` e l'eseguibile è `enteauth`/`ente-auth` da un percorso
-  root-owned (`/usr/`, `/opt/`, `/var/lib/flatpak/`, `/snap/`); se l'app gira
-  nascosta la mostra, se visibile la nasconde, se non gira la lancia
+- `ente-auth-dropdown` — script di toggle: prima di decidere se l'app è già in
+  esecuzione verifica classe `io.ente.auth` **e** eseguibile (`enteauth`/`ente-auth`
+  da un percorso root-owned: `/usr/`, `/opt/`, `/var/lib/flatpak/`, `/snap/`,
+  non scrivibile da group/other). Quella regola governa lancio, auto-chiusura e
+  "porta la finestra nel workspace", non cosa mostra il workspace: la regola
+  finestra in `hypr/ente-auth.lua` sposta lì qualunque finestra che dichiari
+  quella classe (la classe è auto-dichiarata dal client). Se l'app gira nascosta
+  la mostra, se visibile la nasconde, se non gira la lancia
   (`/usr/bin/enteauth`, AUR). Usa la sintassi dispatcher Lua di Hyprland 0.56
   (`hl.dsp.workspace.toggle_special`), quella legacy `togglespecialworkspace`
   su questa build fallisce in silenzio.
@@ -75,7 +79,8 @@ regola finestra + keybind + watcher + pulizia `shell.json`:
 6. ferma il watcher precedente (altrimenti resterebbe in esecuzione il vecchio
    codice), `hyprctl reload` + controllo `hyprctl configerrors`, poi avvia il
    nuovo watcher di auto-chiusura (parte comunque da solo a ogni reload/avvio
-   successivo)
+   successivo). Un `hyprctl reload` che fallisce (SSH/TTY, sessione non viva)
+   stampa un warning e non interrompe l'installazione.
 
 Poi posiziona il widget: `omarchy bar put meviusisback.ente-auth --section right`.
 
@@ -90,8 +95,11 @@ omarchy plugin remove meviusisback.ente-auth
 Rimuove script, regola, hook e keybind, ferma il watcher, poi `hyprctl reload`.
 Restano i backup `hyprland.lua.bak` e `bindings.lua.bak` (cancellali a mano
 se non servono), le modifiche a `shell.json` (le voci legacy restano rimosse)
-e i file di stato del watcher in `$XDG_RUNTIME_DIR/ente-auth-dropdown`
-(lock/pid, spariscono al riavvio della sessione).
+e la directory di stato del watcher `$XDG_RUNTIME_DIR/ente-auth-dropdown`
+(lock/pid/prev-window: sparisce al riavvio della sessione; se `XDG_RUNTIME_DIR`
+non è impostato il fallback è `/tmp/ente-auth-dropdown.<uid>`, che **non**
+sparisce). Da un'installazione ≤ 1.1.0 può restare anche il vecchio lock
+`$XDG_RUNTIME_DIR/ente-auth-dropdown.watch.lock`: nessun codice lo rimuove.
 
 ## License
 

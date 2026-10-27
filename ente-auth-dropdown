@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/usr/bin/bash
 # ente-auth-dropdown — toggle the real Ente Auth desktop app as a dropdown overlay.
 #
 # No secrets, no network: this script asks the compositor for its window list,
@@ -258,9 +258,11 @@ pull_into_special() {
 # NOTE: dispatcher form for Hyprland 0.56 Lua engine (legacy
 # `togglespecialworkspace <ws>` fails silently on this build).
 # Return code is checked: a rejected dispatch must never read as success.
+# Bounded like every other compositor call: on the clipboard path this handler
+# holds the event lock, so an unresponsive compositor must not pin it forever.
 toggle_ws() {
   local out
-  out="$("$HYPRCTL" dispatch "hl.dsp.workspace.toggle_special(\"$WS\")" 2>&1)" || die "toggle dispatch failed: $out"
+  out="$("$TIMEOUT_BIN" 2 "$HYPRCTL" dispatch "hl.dsp.workspace.toggle_special(\"$WS\")" 2>&1)" || die "toggle dispatch failed: $out"
 }
 
 # Show with verification: a stale monitors read must never flip into a hide.

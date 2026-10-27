@@ -142,7 +142,10 @@ Panel {
     id: installReprobeTimer
     interval: 30000
     repeat: true
-    running: true
+    // Only while the installed copy is missing: the removal direction is
+    // already covered by the failed-poll re-probe, so a permanent 30s fork
+    // after ./install.sh would be pure cost.
+    running: !root.scriptInstalled
     onTriggered: {
       if (!installProbe.running) installProbe.running = true
     }
