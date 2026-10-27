@@ -3,6 +3,10 @@
 Ente Auth vera (app desktop) come dropdown in sovraimpressione: icona lucchetto
 sulla barra oppure `SUPER + E` per mostrarla/nasconderla ovunque tu sia.
 
+## Screenshot
+
+![Ente Auth dropdown infographic](ente-auth-dropdown-infographic.png)
+
 ## Come funziona
 
 - Widget barra (`BarWidget.qml`, plugin `meviusisback.ente-auth`): bottone icona,
