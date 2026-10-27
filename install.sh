@@ -133,16 +133,19 @@ is_wlpaste_argv() {
     */wl-paste|wl-paste) ;;
     *) return 1 ;;
   esac
-  _exe="$("$READLINK_BIN" -- "/proc/$1/exe" 2>/dev/null)" || return 1
-  case "$_exe" in
-    *" (deleted)") _exe="${_exe% (deleted)}" ;;   # binary upgraded under us
-  esac
-  # Compare RESOLVED paths (a symlinked /usr/bin/wl-paste is legitimate), and
-  # fall back to argv-only when realpath is unavailable so teardown keeps working.
-  if [ -x "$REALPATH_BIN" ]; then
-    _wp="$("$REALPATH_BIN" -m -- "$WLPASTE_BIN" 2>/dev/null || printf '%s' "$WLPASTE_BIN")"
-    _exe_r="$("$REALPATH_BIN" -m -- "$_exe" 2>/dev/null || printf '%s' "$_exe")"
-    [ "$_exe_r" = "$_wp" ] || return 1
+  # Same binary check as the toggle: a foreign binary that merely carries the
+  # name wl-paste must not be reaped. Degrades to argv-only when readlink is
+  # unavailable, so teardown never breaks on an exotic host.
+  if [ -x "$READLINK_BIN" ]; then
+    _exe="$("$READLINK_BIN" -- "/proc/$1/exe" 2>/dev/null || true)"
+    case "$_exe" in
+      *" (deleted)") _exe="${_exe% (deleted)}" ;;   # binary upgraded under us
+    esac
+    if [ -n "$_exe" ] && [ -x "$REALPATH_BIN" ]; then
+      _wp="$("$REALPATH_BIN" -m -- "$WLPASTE_BIN" 2>/dev/null || printf '%s' "$WLPASTE_BIN")"
+      _exe_r="$("$REALPATH_BIN" -m -- "$_exe" 2>/dev/null || printf '%s' "$_exe")"
+      [ "$_exe_r" = "$_wp" ] || return 1
+    fi
   fi
   { [ "${_a[1]}" = "--watch" ] && { [ "${_a[2]}" = "$2" ] || [ "${_a[2]}" = "${BIN_DST_REAL:-$2}" ]; }; }
 }
@@ -309,9 +312,10 @@ do_install() {
   done
   # Never append on top of an unterminated (or already doubled) marker block:
   # a second block would make uninstall delete everything between the two
-  # BEGIN lines. Count, don't guess.
-  _nb="$("$GREP_BIN" -cF -- "$BIND_BEGIN" "$BIND_LUA" 2>/dev/null || true)"
-  _ne="$("$GREP_BIN" -cF -- "$BIND_END" "$BIND_LUA" 2>/dev/null || true)"
+  # BEGIN lines. Count OCCURRENCES, not matching lines: two markers on one
+  # line are still two markers (grep -c would report 1 and let it through).
+  _nb="$("$GREP_BIN" -oF -- "$BIND_BEGIN" "$BIND_LUA" 2>/dev/null | "$GREP_BIN" -c '' || true)"
+  _ne="$("$GREP_BIN" -oF -- "$BIND_END" "$BIND_LUA" 2>/dev/null | "$GREP_BIN" -c '' || true)"
   if [ "${_nb:-0}" != "${_ne:-0}" ] || [ "${_nb:-0}" -gt 1 ]; then
     die "unterminated or duplicated marker block in $BIND_LUA (nothing written): fix or remove it by hand"
   fi
@@ -356,7 +360,7 @@ do_install() {
   # A failed reload (SSH/TTY, stale signature, non-Lua build) must not abort an
   # otherwise good install: everything is already on disk and the previous
   # watcher is already stopped, so warn and keep going to the start below.
-  "$HYPRCTL" reload 2>/dev/null || msg "warning: hyprctl reload failed (no live Hyprland?); the watcher starts at the next reload/login"
+  "$HYPRCTL" reload 2>/dev/null || msg "warning: hyprctl reload failed (no live Hyprland?); rule and keybind apply at the next reload/login (the watcher is started below anyway)"
   # Auto-close watcher: hypr/ente-auth.lua starts it on config load, and we
   # spawn it here too so the feature is live right after an upgrade instead of
   # at the next login. The script's flock makes the second start a no-op.

@@ -81,9 +81,10 @@ regola finestra + keybind + watcher + pulizia `shell.json`:
    nuovo watcher di auto-chiusura (parte comunque da solo a ogni reload/avvio
    successivo). Un `hyprctl reload` che fallisce (SSH/TTY, sessione non viva)
    stampa un warning e non interrompe l'installazione: in quel caso regola
-   finestra, keybind e watcher diventano attivi solo al primo reload/login
-   riuscito. Un blocco marker `BEGIN` senza `END` (o già doppio) fa rifiutare
-   l'installazione invece di impilarne un secondo.
+   finestra e keybind diventano attivi solo al primo reload/login riuscito,
+   mentre il watcher viene avviato subito da `install.sh` (e si riavvia da solo
+   a ogni reload). Un blocco marker `BEGIN` senza `END` (o già doppio) fa
+   rifiutare l'installazione invece di impilarne un secondo.
 
 Poi posiziona il widget: `omarchy bar put meviusisback.ente-auth --section right`.
 
