@@ -2,7 +2,7 @@
 
 # Ente Auth dropdown
 
-**La vera app desktop di Ente Auth come dropdown in sovraimpressione: icona lucchetto sulla barra e toggle con `SUPER + E` ovunque tu sia.**
+**The real Ente Auth desktop app as an overlay dropdown: lock icon in the bar and `SUPER + E` toggle from anywhere.**
 
 [![Release](https://img.shields.io/github/v/release/meviusisback/omarchy-ente-auth-dropdown)](https://github.com/meviusisback/omarchy-ente-auth-dropdown/releases)
 [![License: MIT](https://img.shields.io/github/license/meviusisback/omarchy-ente-auth-dropdown)](LICENSE)
@@ -12,35 +12,34 @@
 
 </div>
 
-## Perché esiste
+## Why it exists
 
-I codici 2FA servono mentre stai facendo login da un'altra parte: aprire l'app
-di autenticazione spezza il flusso e ti fa perdere il focus proprio quando devi
-trascrivere cifre a tempo. Questo plugin tratta l'app ufficiale di Ente Auth
-come un dropdown: una pressione di tasti e compare sopra quello che stai
-facendo; quando scegli un codice si chiude da solo e il focus torna dov'era.
-Login, sync E2EE e codici restano nell'app ufficiale.
+2FA codes are needed while you are logging in somewhere else: opening the
+authenticator app breaks the flow and steals focus right when you have to
+transcribe time-based digits. This plugin treats the official Ente Auth app as
+a dropdown: one keypress and it appears over what you are doing; when you pick
+a code it closes itself and focus returns where it was. Login, E2EE sync and
+codes stay in the official app.
 
-## Cosa fa
+## What it does
 
-- **Widget barra** (`BarWidget.qml`, plugin `meviusisback.ente-auth`): bottone
-  icona, click = toggle, stato rilevato ogni 2 s. Non tocca segreti: legge solo
-  `VISIBLE=0/1` e non logga mai l'output raw.
-- **Dropdown su special workspace**: la finestra di Ente Auth vive nascosta e
-  appare in sovraimpressione quando la chiami, da qualunque workspace.
-- **Keybind globale `SUPER + E`** → `~/.local/bin/ente-auth-dropdown toggle`
-  (installato da `install.sh`; nessun default keybind letto dal codice).
-- **Auto-chiusura alla scelta del codice**: quando scegli un codice con la
-  finestra di Ente attiva, il dropdown si nasconde da solo e il focus torna
-  sulla finestra precedente (best-effort). Servono `wl-clipboard` e aver
-  lanciato `./install.sh` almeno una volta.
-- **Nessun segreto memorizzato**: login, sync E2EE e codici restano nell'app di
-  Ente. Il watcher legge dagli appunti solo la dimensione in byte (per
-  distinguere una copia dalla cancellazione automatica di Ente): il codice
-  attraversa lo stdin del watcher come conteggio e non viene mai salvato,
-  loggato o inoltrato.
+- **Bar widget** (`BarWidget.qml`, plugin `meviusisback.ente-auth`): icon
+  button, click = toggle, state probed every 2 s. It never touches secrets: it
+  only reads `VISIBLE=0/1` and never logs raw output.
+- **Dropdown on a special workspace**: the Ente Auth window lives hidden and
+  appears as an overlay when you call it, from any workspace.
+- **Global keybind `SUPER + E`** → `~/.local/bin/ente-auth-dropdown toggle`
+  (installed by `install.sh`; no keybind default read by the code).
+- **Auto-close on code pick**: when you pick a code with the Ente window
+  active, the dropdown hides itself and focus returns to the previous window
+  (best-effort). Requires `wl-clipboard` and having run `./install.sh` at
+  least once.
+- **No secrets stored**: login, E2EE sync and codes stay in the Ente app. The
+  watcher reads only the byte size from the clipboard (to tell a copy apart
+  from Ente's automatic clearing): the code travels through the watcher stdin
+  as a count and is never saved, logged or forwarded.
 
-## Installazione
+## Install
 
 ```bash
 omarchy plugin add https://github.com/meviusisback/omarchy-ente-auth-dropdown.git
@@ -48,92 +47,92 @@ omarchy plugin enable meviusisback.ente-auth
 ./install.sh
 ```
 
-(`./install.sh` va lanciato dalla directory del plugin,
+(Run `./install.sh` from the plugin directory,
 `~/.config/omarchy/plugins/meviusisback.ente-auth`.)
 
-`install.sh` è idempotente (blocchi marcati, mai duplicati) e installa copie +
-regola finestra + keybind + watcher + pulizia `shell.json`:
+`install.sh` is idempotent (marked blocks, never duplicated) and installs
+copies + window rule + keybind + watcher + `shell.json` cleanup:
 
-1. copia `ente-auth-dropdown` in `~/.local/bin/` (modo 755, verificato con `cmp`)
-2. copia `hypr/ente-auth.lua` in `~/.config/hypr/`
-3. aggiunge l'hook di caricamento in `~/.config/hypr/hyprland.lua`
-4. aggiunge il keybind `SUPER + E` in `~/.config/hypr/bindings.lua` (il keybind
-   esiste solo da questo passo in poi)
-5. rimuove eventuali voci legacy `id == 'ente-auth'` di tipo command da
-   `shell.json` (mai il widget del plugin)
-6. ferma il watcher precedente (altrimenti resterebbe in esecuzione il vecchio
-   codice), `hyprctl reload` + controllo `hyprctl configerrors`, poi avvia il
-   nuovo watcher di auto-chiusura (parte comunque da solo a ogni reload/avvio
-   successivo). Un `hyprctl reload` che fallisce (SSH/TTY, sessione non viva)
-   stampa un warning e non interrompe l'installazione: in quel caso regola
-   finestra e keybind diventano attivi solo al primo reload/login riuscito,
-   mentre il watcher viene avviato subito da `install.sh` (e si riavvia da solo
-   a ogni reload). Un blocco marker `BEGIN` senza `END` (o già doppio) fa
-   rifiutare l'installazione invece di impilarne un secondo.
+1. copies `ente-auth-dropdown` to `~/.local/bin/` (mode 755, verified with `cmp`)
+2. copies `hypr/ente-auth.lua` to `~/.config/hypr/`
+3. adds the load hook to `~/.config/hypr/hyprland.lua`
+4. adds the `SUPER + E` keybind to `~/.config/hypr/bindings.lua` (the keybind
+   only exists from this step on)
+5. removes any legacy `id == 'ente-auth'` command-type entries from
+   `shell.json` (never the plugin widget)
+6. stops the previous watcher (otherwise the old code would keep running),
+   `hyprctl reload` + `hyprctl configerrors` check, then starts the new
+   auto-close watcher (it also starts on its own at every later reload/boot).
+   A failing `hyprctl reload` (SSH/TTY, no live session) prints a warning and
+   does not stop the install: in that case the window rule and keybind only
+   become active at the first successful reload/login, while the watcher is
+   started immediately by `install.sh` (and restarts on its own at every
+   reload). A `BEGIN` marker block without `END` (or an already doubled one)
+   refuses the install instead of stacking a second copy.
 
-Poi posiziona il widget: `omarchy bar put meviusisback.ente-auth --section right`.
+Then place the widget: `omarchy bar put meviusisback.ente-auth --section right`.
 
-## Utilizzo
+## Usage
 
-- `SUPER + E` ovunque: se l'app gira nascosta la mostra, se visibile la
-  nasconde, se non gira la lancia.
-- Click sul lucchetto nella barra: stessa cosa.
-- Quando scegli un codice con la finestra di Ente attiva, il dropdown si chiude
-  da solo e il focus torna dov'era. Funzionano anche `SUPER + E` (oppure `Esc`
-  a lista visibile: è l'app stessa a chiuderlo). Se hai `special_fallthrough`
-  attivo (lo imposta già il plugin dropdown-terminal, non questo script), basta
-  anche cliccare fuori.
-- Lo script chiede al compositor la lista delle finestre (e sposta la finestra
-  fra i workspace); `status` riporta solo se il workspace speciale è mostrato
-  (`VISIBLE=1`), non se la finestra esiste.
+- `SUPER + E` anywhere: if the app runs hidden it shows it, if visible it
+  hides it, if not running it launches it.
+- Click the lock in the bar: same thing.
+- When you pick a code with the Ente window active, the dropdown closes
+  itself and focus returns where it was. `SUPER + E` also works (or `Esc`
+  with a visible list: the app itself closes it). If you have
+  `special_fallthrough` enabled (set by the dropdown-terminal plugin, not this
+  script), clicking outside is also enough.
+- The script asks the compositor for the window list (and moves the window
+  across workspaces); `status` only reports whether the special workspace is
+  shown (`VISIBLE=1`), not whether the window exists.
 
-## Requisiti
+## Requirements
 
-- Omarchy con Hyprland 0.56+ (sintassi dispatcher Lua)
-- App desktop Ente Auth installata (`ente-auth` da AUR, comando
+- Omarchy with Hyprland 0.56+ (Lua dispatcher syntax)
+- Ente Auth desktop app installed (`ente-auth` from AUR, command
   `/usr/bin/enteauth`)
-- `wl-clipboard` (`wl-paste`) per l'auto-chiusura: senza quel pacchetto il
-  toggle e il keybind funzionano lo stesso, il watcher semplicemente non parte
-- Nerd Font per l'icona lucchetto nella barra
+- `wl-clipboard` (`wl-paste`) for auto-close: without that package the toggle
+  and keybind still work, the watcher just does not start
+- Nerd Font for the lock icon in the bar
 
-## Configurazione
+## Configuration
 
-- Keybind `SUPER + E`: vive in `~/.config/hypr/bindings.lua`, installato da
-  `install.sh` (nessun default keybind letto dal codice).
-- Comando di lancio: `/usr/bin/enteauth` nello script `ente-auth-dropdown`.
-- Classe finestra: `hypr/ente-auth.lua` (default `io.ente.auth`).
+- Keybind `SUPER + E`: lives in `~/.config/hypr/bindings.lua`, installed by
+  `install.sh` (no keybind default read by the code).
+- Launch command: `/usr/bin/enteauth` in the `ente-auth-dropdown` script.
+- Window class: `hypr/ente-auth.lua` (default `io.ente.auth`).
 
-## Come funziona
+## How it works
 
-- Widget barra (`BarWidget.qml`, plugin `meviusisback.ente-auth`): bottone
-  icona, click = toggle, stato rilevato ogni 2 s. Non tocca segreti: legge solo
-  `VISIBLE=0/1` e non logga mai l'output raw.
-- `hypr/ente-auth.lua` — regola finestra: la classe `io.ente.auth` va su
-  `special:ente-auth`, flottante, centrata sotto la barra (70% larghezza x 50%
-  altezza del monitor). Lo stesso file avvia il watcher di auto-chiusura
-  all'avvio di Hyprland e dopo ogni `hyprctl reload`.
-- `ente-auth-dropdown` — script di toggle: prima di decidere se l'app è già in
-  esecuzione verifica classe `io.ente.auth` **e** eseguibile
-  (`enteauth`/`ente-auth` da un percorso root-owned: `/usr/`, `/opt/`,
-  `/var/lib/flatpak/`, `/snap/`, non scrivibile da group/other). Quella regola
-  governa lancio, auto-chiusura e "porta la finestra nel workspace", non cosa
-  mostra il workspace: la regola finestra in `hypr/ente-auth.lua` sposta lì
-  qualunque finestra che dichiari quella classe (la classe è auto-dichiarata
-  dal client). Se l'app gira nascosta la mostra, se visibile la nasconde, se
-  non gira la lancia (`/usr/bin/enteauth`, AUR). Usa la sintassi dispatcher Lua
-  di Hyprland 0.56 (`hl.dsp.workspace.toggle_special`); quella legacy
-  `togglespecialworkspace` su questa build fallisce in silenzio.
-- Auto-chiusura (`ente-auth-dropdown watch`): Ente Auth copia il codice negli
-  appunti Wayland quando clicchi una voce, e quel cambio di selezione è l'unico
-  segnale che l'app espone. Il watcher (`wl-paste --watch`) reagisce solo se la
-  finestra attiva è proprio l'app di Ente (stessa regola: classe + eseguibile
-  `enteauth` da percorso root-owned): nasconde il dropdown e il focus torna
-  sulla finestra precedente. Del contenuto degli appunti legge solo la
-  **dimensione** (per distinguere una copia dalla cancellazione automatica di
-  Ente): il codice non viene mai salvato, loggato o passato altrove. È un
-  singleton (`flock`), quindi i reload non ne accumulano copie.
+- Bar widget (`BarWidget.qml`, plugin `meviusisback.ente-auth`): icon button,
+  click = toggle, state probed every 2 s. It never touches secrets: it only
+  reads `VISIBLE=0/1` and never logs raw output.
+- `hypr/ente-auth.lua` — window rule: the `io.ente.auth` class goes to
+  `special:ente-auth`, floating, centered under the bar (70% width x 50%
+  monitor height). The same file starts the auto-close watcher at Hyprland
+  startup and after every `hyprctl reload`.
+- `ente-auth-dropdown` — toggle script: before deciding whether the app
+  already runs it verifies class `io.ente.auth` **and** executable
+  (`enteauth`/`ente-auth` from a root-owned path: `/usr/`, `/opt/`,
+  `/var/lib/flatpak/`, `/snap/`, not group/other-writable). That rule governs
+  launch, auto-close and "bring the window to the workspace", not what the
+  workspace shows: the window rule in `hypr/ente-auth.lua` moves there any
+  window declaring that class (the class is self-declared by the client). If
+  the app runs hidden it shows it, if visible it hides it, if not running it
+  launches it (`/usr/bin/enteauth`, AUR). It uses the Hyprland 0.56 Lua
+  dispatcher syntax (`hl.dsp.workspace.toggle_special`); the legacy
+  `togglespecialworkspace` fails silently on this build.
+- Auto-close (`ente-auth-dropdown watch`): Ente Auth copies the code to the
+  Wayland clipboard when you click an entry, and that selection change is the
+  only signal the app exposes. The watcher (`wl-paste --watch`) only reacts
+  if the active window is really the Ente app (same rule: class + `enteauth`
+  executable from a root-owned path): it hides the dropdown and focus returns
+  to the previous window. Of the clipboard content it reads only the **size**
+  (to tell a copy apart from Ente's automatic clearing): the code is never
+  saved, logged or passed anywhere else. It is a singleton (`flock`), so
+  reloads do not pile up copies.
 
-## Rimozione
+## Removal
 
 ```bash
 ./install.sh uninstall
@@ -141,16 +140,16 @@ omarchy plugin disable meviusisback.ente-auth
 omarchy plugin remove meviusisback.ente-auth
 ```
 
-Rimuove script, regola, hook e keybind, ferma il watcher, poi `hyprctl reload`.
-Restano i backup `hyprland.lua.bak` e `bindings.lua.bak` (cancellali a mano se
-non servono), le modifiche a `shell.json` (le voci legacy restano rimosse) e la
-directory di stato del watcher `$XDG_RUNTIME_DIR/ente-auth-dropdown` (lock,
-lock degli eventi clipboard, pid e finestra-precedente: sparisce al riavvio
-della sessione; se `XDG_RUNTIME_DIR` non è impostato il fallback è
-`/tmp/ente-auth-dropdown.<uid>`, che **non** sparisce). Da un'installazione ≤
-1.1.0 può restare anche il vecchio lock
-`$XDG_RUNTIME_DIR/ente-auth-dropdown.watch.lock`: nessun codice lo rimuove.
+Removes script, rule, hook and keybind, stops the watcher, then
+`hyprctl reload`. These remain: `hyprland.lua.bak` and `bindings.lua.bak`
+backups (delete by hand if unneeded), `shell.json` edits (legacy entries stay
+removed) and the watcher state directory
+`$XDG_RUNTIME_DIR/ente-auth-dropdown` (lock, clipboard-event lock, pid and
+previous-window: gone at session restart; if `XDG_RUNTIME_DIR` is unset the
+fallback is `/tmp/ente-auth-dropdown.<uid>`, which does **not** disappear). An
+install ≤ 1.1.0 may also leave the old lock
+`$XDG_RUNTIME_DIR/ente-auth-dropdown.watch.lock`: no code removes it.
 
-## Licenza
+## License
 
-MIT — vedi [LICENSE](LICENSE).
+MIT — see [LICENSE](LICENSE).
