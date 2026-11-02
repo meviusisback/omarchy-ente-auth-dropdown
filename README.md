@@ -18,7 +18,8 @@
 authenticator app breaks the flow and steals focus right when you have to
 transcribe time-based digits. This plugin treats the official Ente Auth app as
 a dropdown: one keypress and it appears over what you are doing; when you pick
-a code it closes itself and focus returns where it was. Login, E2EE sync and
+a code it closes itself and hands focus back to the window that had it (only
+if one was recorded). Login, E2EE sync and
 codes stay in the official app.
 
 ## What it does
@@ -31,9 +32,9 @@ codes stay in the official app.
 - **Global keybind `SUPER + E`** → `~/.local/bin/ente-auth-dropdown toggle`
   (installed by `install.sh`; no keybind default read by the code).
 - **Auto-close on code pick**: when you pick a code with the Ente window
-  active, the dropdown hides itself and focus returns to the previous window
-  (best-effort). Requires `wl-clipboard` and having run `./install.sh` at
-  least once.
+  active, the dropdown hides itself and hands focus back to the previously
+  focused window, when one was recorded (best-effort). Requires `wl-clipboard`
+  and having run `./install.sh` at least once.
 - **No secrets stored**: login, E2EE sync and codes stay in the Ente app. The
   watcher reads only the byte size from the clipboard (to tell a copy apart
   from Ente's automatic clearing): the code travels through the watcher stdin
@@ -78,7 +79,8 @@ Then place the widget: `omarchy bar put meviusisback.ente-auth --section right`.
   hides it, if not running it launches it.
 - Click the lock in the bar: same thing.
 - When you pick a code with the Ente window active, the dropdown closes
-  itself and focus returns where it was. `SUPER + E` also works (or `Esc`
+  itself and hands focus back to the window that had it (if one was recorded).
+  `SUPER + E` also works (or `Esc`
   with a visible list: the app itself closes it). If you have
   `special_fallthrough` enabled (set by the dropdown-terminal plugin, not this
   script), clicking outside is also enough.
@@ -126,8 +128,9 @@ Then place the widget: `omarchy bar put meviusisback.ente-auth --section right`.
   Wayland clipboard when you click an entry, and that selection change is the
   only signal the app exposes. The watcher (`wl-paste --watch`) only reacts
   if the active window is really the Ente app (same rule: class + `enteauth`
-  executable from a root-owned path): it hides the dropdown and focus returns
-  to the previous window. Of the clipboard content it reads only the **size**
+  executable from a root-owned path): it hides the dropdown and hands focus
+  back to the previously focused window, when one was recorded. Of the
+  clipboard content it reads only the **size**
   (to tell a copy apart from Ente's automatic clearing): the code is never
   saved, logged or passed anywhere else. It is a singleton (`flock`), so
   reloads do not pile up copies.
